@@ -2085,3 +2085,147 @@ def find_references(asset_path, base_path="/Game", asset_types=None):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# R2. find_breaking_changes
+# ---------------------------------------------------------------------------
+
+def find_breaking_changes(asset_path, parameter_name=None, expression_name=None,
+                          base_path="/Game"):
+    """Analyze what would break if a parameter or expression were removed.
+
+    Parameters
+    ----------
+    asset_path : str
+        Base material asset path.
+    parameter_name : str or None
+        Parameter to check removal of.
+    expression_name : str or None
+        Expression to check removal of.
+    base_path : str
+        Scope for MI search.
+
+    Returns
+    -------
+    str
+        JSON with affected instances and downstream connections.
+    """
+    try:
+        mat = _load_material(asset_path)
+        mel = _mel()
+
+        affected_instances = []
+        downstream_connections = []
+        target = parameter_name or expression_name or "unknown"
+        target_type = "parameter" if parameter_name else "expression"
+
+        if parameter_name:
+            # Find child instances that override this parameter
+            try:
+                children = mel.get_child_instances(mat)
+                for child_data in children:
+                    try:
+                        child_path = str(child_data.package_name)
+                        if not child_path.startswith(base_path):
+                            continue
+                        child_mat = _eal().load_asset(child_path)
+                        if child_mat is None:
+                            continue
+
+                        for ptype, getter_name, value_getter_name in [
+                            ("Scalar", "get_scalar_parameter_names",
+                             "get_material_instance_scalar_parameter_value"),
+                            ("Vector", "get_vector_parameter_names",
+                             "get_material_instance_vector_parameter_value"),
+                            ("Texture", "get_texture_parameter_names",
+                             "get_material_instance_texture_parameter_value"),
+                            ("StaticSwitch", "get_static_switch_parameter_names",
+                             "get_material_instance_static_switch_parameter_value"),
+                        ]:
+                            try:
+                                names = [str(n) for n in getattr(mel, getter_name)(child_mat)]
+                                if parameter_name in names:
+                                    try:
+                                        val = getattr(mel, value_getter_name)(
+                                            child_mat, parameter_name
+                                        )
+                                        if ptype == "Vector":
+                                            val_repr = {"r": val.r, "g": val.g,
+                                                        "b": val.b, "a": val.a}
+                                        elif ptype == "Texture":
+                                            val_repr = val.get_path_name() if val else None
+                                        else:
+                                            val_repr = float(val) if ptype == "Scalar" else bool(val)
+                                    except Exception:
+                                        val_repr = "unknown"
+                                    affected_instances.append({
+                                        "path": child_path,
+                                        "override_value": val_repr,
+                                        "parameter_type": ptype,
+                                    })
+                                    break
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # Find downstream connections from the parameter expression
+            try:
+                full_path = _full_object_path(asset_path)
+                param_classes = ["ScalarParameter", "VectorParameter",
+                                 "TextureSampleParameter2D", "StaticSwitchParameter"]
+                for cls in param_classes:
+                    for i in range(200):
+                        obj_path = f"{full_path}:MaterialExpression{cls}_{i}"
+                        expr = unreal.find_object(None, obj_path)
+                        if expr is None:
+                            if i > 30:
+                                break
+                            continue
+                        try:
+                            pname = str(expr.get_editor_property("parameter_name"))
+                        except Exception:
+                            continue
+                        if pname == parameter_name:
+                            downstream_connections.append({
+                                "expression": _expr_id(expr),
+                                "note": "This expression would be removed",
+                            })
+                            break
+            except Exception:
+                pass
+
+        elif expression_name:
+            full_path = _full_object_path(asset_path)
+            if not expression_name.startswith("MaterialExpression"):
+                expression_name = f"MaterialExpression{expression_name}"
+            obj_path = f"{full_path}:{expression_name}"
+            expr = unreal.find_object(None, obj_path)
+            if expr is None:
+                return _error_json(f"Expression not found: {expression_name}")
+
+            for prop_label, prop_attr in _MATERIAL_PROPERTIES:
+                try:
+                    prop_enum = getattr(unreal.MaterialProperty, prop_attr)
+                    node = mel.get_material_property_input_node(mat, prop_enum)
+                    if node is not None:
+                        downstream_connections.append({
+                            "output_pin": prop_label,
+                            "note": f"Output pin {prop_label} may depend on this expression",
+                        })
+                except Exception:
+                    continue
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "target": target,
+            "target_type": target_type,
+            "affected_instances": affected_instances,
+            "downstream_connections": downstream_connections,
+        })
+    except Exception as exc:
+        return _error_json(exc)

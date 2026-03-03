@@ -1124,6 +1124,76 @@ def find_material_references(
 
 
 # ---------------------------------------------------------------------------
+# Tool 19: find_breaking_changes
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def find_breaking_changes(
+    asset_path: str,
+    parameter_name: str | None = None,
+    expression_name: str | None = None,
+    base_path: str = "/Game",
+) -> str:
+    """Analyze what would break if a parameter or expression were removed.
+
+    Args:
+        asset_path: Base material path
+        parameter_name: Parameter to check removal of
+        expression_name: Expression to check removal of
+        base_path: Scope for child instance search
+    """
+    param_arg = f"'{_escape_py_string(parameter_name)}'" if parameter_name else "None"
+    expr_arg = f"'{_escape_py_string(expression_name)}'" if expression_name else "None"
+
+    script = (
+        f"result = material_helpers.find_breaking_changes("
+        f"'{_escape_py_string(asset_path)}', "
+        f"parameter_name={param_arg}, "
+        f"expression_name={expr_arg}, "
+        f"base_path='{_escape_py_string(base_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    target = data.get("target", "?")
+    target_type = data.get("target_type", "?")
+    instances = data.get("affected_instances", [])
+    connections = data.get("downstream_connections", [])
+
+    lines = [
+        f"Breaking change analysis for removing {target_type} '{target}' "
+        f"from {data.get('asset_path', asset_path)}:",
+    ]
+
+    if not instances and not connections:
+        lines.append("  No breaking changes detected.")
+        return "\n".join(lines)
+
+    if instances:
+        lines.append(f"  Affected instances ({len(instances)}):")
+        for inst in instances:
+            val = inst.get("override_value", "?")
+            lines.append(f"    {inst.get('path', '?')} (override: {val})")
+
+    if connections:
+        lines.append(f"  Downstream connections ({len(connections)}):")
+        for conn in connections:
+            expr = conn.get("expression", conn.get("output_pin", "?"))
+            note = conn.get("note", "")
+            inp = conn.get("input", "")
+            if inp:
+                lines.append(f"    → {expr} (input {inp})")
+            else:
+                lines.append(f"    → {expr}: {note}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

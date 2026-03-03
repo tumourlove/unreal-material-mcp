@@ -965,3 +965,51 @@ class TestFindMaterialReferences:
         result = server.find_material_references("/Game/Materials/M_Unused")
 
         assert "0 references" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 19: find_breaking_changes
+# ---------------------------------------------------------------------------
+
+class TestFindBreakingChanges:
+    """Output formatting tests for find_breaking_changes."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_parameter_removal_impact(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Character",
+            "target": "Roughness",
+            "target_type": "parameter",
+            "affected_instances": [
+                {"path": "/Game/MI_Pale", "override_value": 0.3},
+                {"path": "/Game/MI_Dark", "override_value": 0.8},
+            ],
+            "downstream_connections": [
+                {"expression": "MaterialExpressionMultiply_2", "input": "A"},
+            ],
+        })
+        result = server.find_breaking_changes(
+            "/Game/M_Character", parameter_name="Roughness"
+        )
+
+        assert "Roughness" in result
+        assert "/Game/MI_Pale" in result
+        assert "0.3" in result
+        assert "MaterialExpressionMultiply_2" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_no_breaking_changes(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Simple",
+            "target": "Unused",
+            "target_type": "parameter",
+            "affected_instances": [],
+            "downstream_connections": [],
+        })
+        result = server.find_breaking_changes(
+            "/Game/M_Simple", parameter_name="Unused"
+        )
+
+        assert "No breaking changes" in result
