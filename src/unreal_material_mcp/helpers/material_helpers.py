@@ -953,10 +953,27 @@ def get_stats(asset_path):
                 f"Unused parameter expressions: {', '.join(unused_params)}"
             )
 
+        # --- Compile status ---
+        compile_status = "success"
+        compile_errors = []
+        try:
+            if (stats.get("num_pixel_shader_instructions", 0) == 0
+                    and stats.get("num_vertex_shader_instructions", 0) == 0):
+                try:
+                    expr_count = int(mel.get_num_material_expressions(mat))
+                    if expr_count > 0:
+                        compile_status = "error"
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return json.dumps({
             "success": True,
             "asset_path": asset_path,
             "stats": stats,
+            "compile_status": compile_status,
+            "compile_errors": compile_errors,
             "warnings": warnings,
             "total_expressions": len(all_expr_names),
             "connected_expressions": len(connected_names & all_expr_names),

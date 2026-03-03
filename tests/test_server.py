@@ -414,6 +414,30 @@ class TestGetMaterialStats:
         assert "High sampler count" in result
 
     @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_compile_errors(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Broken",
+            "stats": {
+                "num_vertex_shader_instructions": 0,
+                "num_pixel_shader_instructions": 0,
+                "num_samplers": 0,
+                "num_pixel_texture_samples": 0,
+                "num_vertex_texture_samples": 0,
+                "num_virtual_texture_samples": 0,
+                "num_uv_scalars": 0,
+                "num_interpolator_scalars": 0,
+            },
+            "compile_status": "error",
+            "compile_errors": ["[SM5] Missing required input BaseColor"],
+            "warnings": [],
+        })
+        result = server.get_material_stats("/Game/M_Broken")
+
+        assert "Compile Status: error" in result
+        assert "Missing required input BaseColor" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
     def test_no_warnings(self, _src):
         _setup_tool_mock({
             "success": True,

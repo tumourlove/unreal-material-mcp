@@ -505,6 +505,15 @@ def get_material_stats(asset_path: str) -> str:
         f"  Interpolator Scalars: {stats.get('num_interpolator_scalars', 'N/A')}",
     ]
 
+    compile_status = data.get("compile_status")
+    if compile_status:
+        lines.append(f"  Compile Status: {compile_status}")
+    compile_errors = data.get("compile_errors", [])
+    if compile_errors:
+        lines.append("  Compile Errors:")
+        for e in compile_errors:
+            lines.append(f"    - {e}")
+
     warnings = data.get("warnings", [])
     if warnings:
         lines.append("  Warnings:")
