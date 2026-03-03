@@ -2013,3 +2013,75 @@ def layout_graph(asset_path):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# R1. find_references
+# ---------------------------------------------------------------------------
+
+def find_references(asset_path, base_path="/Game", asset_types=None):
+    """Find all assets that reference the given material or material instance.
+
+    Parameters
+    ----------
+    asset_path : str
+        Material or MI asset path.
+    base_path : str
+        Narrow search scope to packages under this path.
+    asset_types : str or None
+        Comma-separated asset type filter (e.g. "StaticMesh,SkeletalMesh").
+
+    Returns
+    -------
+    str
+        JSON with references list.
+    """
+    try:
+        mat = _load_material(asset_path)
+        ar = unreal.AssetRegistryHelpers.get_asset_registry()
+
+        package_name = unreal.Name(asset_path)
+        referencers = ar.get_referencers(package_name)
+
+        type_filter = None
+        if asset_types:
+            type_filter = set(t.strip() for t in asset_types.split(","))
+
+        references = []
+        packages_scanned = len(referencers)
+        for ref_pkg in referencers:
+            ref_str = str(ref_pkg)
+            if not ref_str.startswith(base_path):
+                continue
+
+            try:
+                assets = ar.get_assets_by_package_name(ref_str)
+                for asset_data in assets:
+                    try:
+                        asset_type = str(asset_data.asset_class_path.asset_name)
+                    except Exception:
+                        try:
+                            asset_type = str(asset_data.asset_class)
+                        except Exception:
+                            asset_type = "Unknown"
+
+                    if type_filter and asset_type not in type_filter:
+                        continue
+
+                    references.append({
+                        "asset_path": str(asset_data.package_name),
+                        "asset_name": str(asset_data.asset_name),
+                        "asset_type": asset_type,
+                    })
+            except Exception:
+                continue
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "references": references,
+            "total_found": len(references),
+            "packages_scanned": packages_scanned,
+        })
+    except Exception as exc:
+        return _error_json(exc)

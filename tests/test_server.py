@@ -924,3 +924,44 @@ class TestRecompileAndLayout:
 
         assert "Error:" in result
         assert "MaterialInstanceConstant" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 18: find_material_references
+# ---------------------------------------------------------------------------
+
+class TestFindMaterialReferences:
+    """Output formatting tests for find_material_references."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_references(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/Materials/M_Character",
+            "references": [
+                {"asset_path": "/Game/Meshes/SM_Body", "asset_type": "StaticMesh"},
+                {"asset_path": "/Game/Characters/SK_Main", "asset_type": "SkeletalMesh"},
+            ],
+            "total_found": 2,
+            "packages_scanned": 45,
+        })
+        result = server.find_material_references("/Game/Materials/M_Character")
+
+        assert "2 references" in result
+        assert "45 packages scanned" in result
+        assert "/Game/Meshes/SM_Body" in result
+        assert "StaticMesh" in result
+        assert "/Game/Characters/SK_Main" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_no_references(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/Materials/M_Unused",
+            "references": [],
+            "total_found": 0,
+            "packages_scanned": 30,
+        })
+        result = server.find_material_references("/Game/Materials/M_Unused")
+
+        assert "0 references" in result

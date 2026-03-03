@@ -1063,6 +1063,67 @@ def layout_material_graph(asset_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Tool 18: find_material_references
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def find_material_references(
+    asset_path: str,
+    base_path: str = "/Game",
+    asset_types: str | None = None,
+) -> str:
+    """Find all assets that reference a given material or material instance.
+
+    Returns meshes, blueprints, Niagara systems, and other assets that
+    depend on this material.
+
+    Args:
+        asset_path: Unreal asset path to a material or MI
+        base_path: Narrow search scope (default '/Game')
+        asset_types: Optional comma-separated filter (e.g. 'StaticMesh,SkeletalMesh')
+    """
+    types_arg = f"'{_escape_py_string(asset_types)}'" if asset_types else "None"
+    script = (
+        f"result = material_helpers.find_references("
+        f"'{_escape_py_string(asset_path)}', "
+        f"base_path='{_escape_py_string(base_path)}', "
+        f"asset_types={types_arg})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    refs = data.get("references", [])
+    total = data.get("total_found", len(refs))
+    scanned = data.get("packages_scanned", 0)
+
+    lines = [
+        f"References to {data.get('asset_path', asset_path)} "
+        f"({total} references, {scanned} packages scanned):",
+    ]
+
+    if not refs:
+        lines.append("  No references found.")
+    else:
+        # Group by type
+        groups: dict[str, list] = {}
+        for r in refs:
+            atype = r.get("asset_type", "Unknown")
+            groups.setdefault(atype, []).append(r)
+
+        for atype in sorted(groups.keys()):
+            items = groups[atype]
+            lines.append(f"  [{atype}] ({len(items)})")
+            for r in items:
+                lines.append(f"    {r.get('asset_path', '?')}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
