@@ -58,7 +58,7 @@ KNOWN_EXPRESSION_CLASSES = [
     "TextureSample", "TextureCoordinate", "TextureObject",
     # Utility / misc
     "LinearInterpolate", "If", "IfThenElse", "Custom", "MaterialFunctionCall",
-    "Comment", "NamedRerouteDeclaration", "NamedRerouteUsage",
+    "Comment", "Reroute", "NamedRerouteDeclaration", "NamedRerouteUsage",
     "VertexColor", "Time", "Fresnel", "DepthFade", "WorldPosition",
     "PixelDepth", "SceneDepth", "ScreenPosition",
     "DepthOfFieldFunction", "SphereMask", "Distance", "DistanceCullFade",
