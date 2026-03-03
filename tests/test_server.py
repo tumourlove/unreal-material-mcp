@@ -1013,3 +1013,52 @@ class TestFindBreakingChanges:
         )
 
         assert "No breaking changes" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 20: find_material_function_usage
+# ---------------------------------------------------------------------------
+
+class TestFindMaterialFunctionUsage:
+    """Output formatting tests for find_material_function_usage."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_usage(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "function_path": "/Game/MF_NormalBlend",
+            "materials_using": [
+                {"material": "/Game/M_Character", "expression": "MFC_0"},
+                {"material": "/Game/M_Weapon", "expression": "MFC_2"},
+            ],
+            "call_chain": None,
+        })
+        result = server.find_material_function_usage("/Game/MF_NormalBlend")
+
+        assert "/Game/M_Character" in result
+        assert "/Game/M_Weapon" in result
+        assert "2" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_call_chain(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "function_path": "/Game/MF_NormalBlend",
+            "materials_using": [],
+            "call_chain": {
+                "name": "MF_NormalBlend",
+                "children": [
+                    {"name": "MF_PackNormal", "children": []},
+                    {"name": "MF_UnpackNormal", "children": [
+                        {"name": "MF_TextureUtility", "children": []},
+                    ]},
+                ],
+            },
+        })
+        result = server.find_material_function_usage(
+            "/Game/MF_NormalBlend", include_chain=True
+        )
+
+        assert "MF_NormalBlend" in result
+        assert "MF_PackNormal" in result
+        assert "MF_TextureUtility" in result

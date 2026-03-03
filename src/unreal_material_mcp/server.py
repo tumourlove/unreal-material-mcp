@@ -1194,6 +1194,62 @@ def find_breaking_changes(
 
 
 # ---------------------------------------------------------------------------
+# Tool 20: find_material_function_usage
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def find_material_function_usage(
+    function_path: str,
+    base_path: str = "/Game",
+    include_chain: bool = False,
+) -> str:
+    """Find which materials use a material function, and optionally trace its call chain.
+
+    Args:
+        function_path: MaterialFunction asset path
+        base_path: Scope for material search
+        include_chain: Include nested function dependency tree
+    """
+    script = (
+        f"result = material_helpers.find_function_usage("
+        f"'{_escape_py_string(function_path)}', "
+        f"base_path='{_escape_py_string(base_path)}', "
+        f"include_chain={include_chain})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    materials = data.get("materials_using", [])
+    lines = [
+        f"Usage of {data.get('function_path', function_path)} ({len(materials)} materials):",
+    ]
+
+    if not materials:
+        lines.append("  No materials found using this function.")
+    else:
+        for m in materials:
+            lines.append(f"  {m.get('material', '?')} → {m.get('expression', '?')}")
+
+    chain = data.get("call_chain")
+    if chain:
+        lines.append("  Call chain:")
+        def _format_chain(node, indent=2):
+            prefix = "  " * indent
+            name = node.get("name", "?")
+            result_lines = [f"{prefix}{name}"]
+            for child in node.get("children", []):
+                result_lines.extend(_format_chain(child, indent + 1))
+            return result_lines
+        lines.extend(_format_chain(chain))
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

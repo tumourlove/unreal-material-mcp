@@ -2229,3 +2229,95 @@ def find_breaking_changes(asset_path, parameter_name=None, expression_name=None,
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# R3. find_function_usage
+# ---------------------------------------------------------------------------
+
+def find_function_usage(function_path, base_path="/Game", include_chain=False):
+    """Find materials using a material function, optionally trace call chain.
+
+    Parameters
+    ----------
+    function_path : str
+        MaterialFunction asset path.
+    base_path : str
+        Scope for material search.
+    include_chain : bool
+        If True, include nested function dependency tree.
+
+    Returns
+    -------
+    str
+        JSON with usage list and optional call chain.
+    """
+    try:
+        ar = unreal.AssetRegistryHelpers.get_asset_registry()
+
+        all_assets = ar.get_assets_by_path(base_path, recursive=True)
+        materials_using = []
+
+        for asset_data in all_assets:
+            try:
+                class_name = str(asset_data.asset_class_path.asset_name)
+            except Exception:
+                continue
+            if class_name != "Material":
+                continue
+
+            mat_path = str(asset_data.package_name)
+            try:
+                fn_data = json.loads(
+                    scan_all_expressions(mat_path, class_filter="MaterialFunctionCall")
+                )
+                if fn_data.get("success"):
+                    for expr in fn_data.get("expressions", []):
+                        fn_ref = expr.get("function", "")
+                        if fn_ref and function_path in fn_ref:
+                            materials_using.append({
+                                "material": mat_path,
+                                "expression": expr.get("name", "?"),
+                            })
+            except Exception:
+                continue
+
+        call_chain = None
+        if include_chain:
+            call_chain = _trace_function_chain(function_path, visited=set())
+
+        return json.dumps({
+            "success": True,
+            "function_path": function_path,
+            "materials_using": materials_using,
+            "call_chain": call_chain,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def _trace_function_chain(function_path, visited=None, depth=0, max_depth=10):
+    """Recursively trace nested MaterialFunctionCall dependencies."""
+    if visited is None:
+        visited = set()
+    if function_path in visited or depth > max_depth:
+        return {"name": function_path.rsplit("/", 1)[-1], "children": [], "cycle": True}
+    visited.add(function_path)
+
+    _, fn_name = _asset_parts(function_path)
+    node = {"name": fn_name, "path": function_path, "children": []}
+
+    try:
+        fn_data = json.loads(
+            scan_all_expressions(function_path, class_filter="MaterialFunctionCall")
+        )
+        if fn_data.get("success"):
+            for expr in fn_data.get("expressions", []):
+                child_path = expr.get("function")
+                if child_path:
+                    child = _trace_function_chain(child_path, visited, depth + 1, max_depth)
+                    node["children"].append(child)
+    except Exception:
+        pass
+
+    return node
