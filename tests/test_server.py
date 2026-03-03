@@ -447,7 +447,10 @@ class TestGetMaterialDependencies:
         _setup_tool_mock({
             "success": True,
             "asset_path": "/Game/M_Foo",
-            "textures": ["/Game/T_Diff", "/Game/T_Norm"],
+            "textures": [
+                {"path": "/Game/T_Diff"},
+                {"path": "/Game/T_Norm"},
+            ],
             "functions": [
                 {"expression": "MF_Blend_0", "function_path": "/Game/MF_Blend"},
             ],
@@ -461,6 +464,36 @@ class TestGetMaterialDependencies:
         assert "MF_Blend_0 -> /Game/MF_Blend" in result
         assert "Parameter Sources (1)" in result
         assert "/Game/MPC_Global" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_textures_with_size_and_format(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "textures": [
+                {
+                    "path": "/Game/T_Diff",
+                    "width": 2048,
+                    "height": 2048,
+                    "format": "PF_DXT5",
+                },
+                {
+                    "path": "/Game/T_Norm",
+                    "width": 1024,
+                    "height": 1024,
+                    "format": "PF_BC5",
+                },
+            ],
+            "functions": [],
+            "parameter_sources": [],
+        })
+        result = server.get_material_dependencies("/Game/M_Foo")
+
+        assert "2048x2048" in result
+        assert "PF_DXT5" in result
+        assert "1024x1024" in result
+        assert "PF_BC5" in result
+        assert "/Game/T_Diff" in result
 
     @patch.object(server, "_get_helper_source", return_value="# src\n")
     def test_empty_dependencies(self, _src):

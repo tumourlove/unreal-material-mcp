@@ -989,9 +989,24 @@ def get_dependencies(asset_path):
             used = mel.get_used_textures(mat)
             for tex in used:
                 try:
-                    textures.append(tex.get_path_name())
+                    tex_entry = {"path": tex.get_path_name()}
+                    try:
+                        tex_entry["width"] = int(tex.blueprint_get_size_x())
+                        tex_entry["height"] = int(tex.blueprint_get_size_y())
+                    except Exception:
+                        pass
+                    try:
+                        tex_entry["format"] = _safe_enum_name(tex.get_editor_property("pixel_format"))
+                    except Exception:
+                        try:
+                            tex_entry["format"] = _safe_enum_name(
+                                tex.get_editor_property("compression_settings")
+                            )
+                        except Exception:
+                            pass
+                    textures.append(tex_entry)
                 except Exception:
-                    textures.append(str(tex))
+                    textures.append({"path": str(tex)})
         except Exception:
             pass
 

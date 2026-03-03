@@ -543,7 +543,15 @@ def get_material_dependencies(asset_path: str) -> str:
     lines.append(f"  Textures ({len(textures)}):")
     if textures:
         for t in textures:
-            lines.append(f"    {t}")
+            if isinstance(t, dict):
+                path = t.get("path", "?")
+                w = t.get("width")
+                h = t.get("height")
+                fmt = t.get("format")
+                size_str = f" ({w}x{h}, {fmt})" if w and h and fmt else ""
+                lines.append(f"    {path}{size_str}")
+            else:
+                lines.append(f"    {t}")
     else:
         lines.append("    (none)")
 
