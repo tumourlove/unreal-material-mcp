@@ -353,3 +353,255 @@ class TestSearchMaterials:
         result = server.search_materials("/Game/Materials", query="Nonexistent")
 
         assert "Found: 0" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 6: get_material_stats
+# ---------------------------------------------------------------------------
+
+class TestGetMaterialStats:
+    """Output formatting tests for get_material_stats."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_stats_with_warnings(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Heavy",
+            "vs_instructions": 50,
+            "ps_instructions": 600,
+            "samplers": 18,
+            "texture_samples": 20,
+            "uv_scalars": 4,
+            "interpolator_scalars": 8,
+            "warnings": ["High sampler count", "High pixel shader instructions"],
+        })
+        result = server.get_material_stats("/Game/M_Heavy")
+
+        assert "VS=50 PS=600" in result
+        assert "Samplers: 18" in result
+        assert "Warnings:" in result
+        assert "High sampler count" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_no_warnings(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Simple",
+            "vs_instructions": 20,
+            "ps_instructions": 30,
+            "samplers": 2,
+            "texture_samples": 2,
+            "uv_scalars": 1,
+            "interpolator_scalars": 2,
+            "warnings": [],
+        })
+        result = server.get_material_stats("/Game/M_Simple")
+
+        assert "No warnings" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 7: get_material_dependencies
+# ---------------------------------------------------------------------------
+
+class TestGetMaterialDependencies:
+    """Output formatting tests for get_material_dependencies."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_dependencies(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "textures": ["/Game/T_Diff", "/Game/T_Norm"],
+            "functions": [
+                {"expression": "MF_Blend_0", "function_path": "/Game/MF_Blend"},
+            ],
+            "parameter_sources": ["/Game/MPC_Global"],
+        })
+        result = server.get_material_dependencies("/Game/M_Foo")
+
+        assert "Textures (2)" in result
+        assert "/Game/T_Diff" in result
+        assert "Material Functions (1)" in result
+        assert "MF_Blend_0 -> /Game/MF_Blend" in result
+        assert "Parameter Sources (1)" in result
+        assert "/Game/MPC_Global" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_empty_dependencies(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Empty",
+            "textures": [],
+            "functions": [],
+            "parameter_sources": [],
+        })
+        result = server.get_material_dependencies("/Game/M_Empty")
+
+        assert "(none)" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 8: inspect_material_function
+# ---------------------------------------------------------------------------
+
+class TestInspectMaterialFunction:
+    """Output formatting tests for inspect_material_function."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_function(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "function_path": "/Game/MF_Blend",
+            "description": "Blends two inputs",
+            "caption": "Custom Blend",
+            "expression_count": 5,
+            "inputs": [
+                {"name": "Base", "type": "Float3"},
+                {"name": "Detail", "type": "Float3"},
+            ],
+            "outputs": [
+                {"name": "Result", "type": "Float3"},
+            ],
+            "expressions": [
+                {"class": "FunctionInput", "name": "Input_0"},
+                {"class": "FunctionOutput", "name": "Output_0"},
+                {"class": "Lerp", "name": "Lerp_0"},
+                {"class": "Multiply", "name": "Multiply_0"},
+            ],
+        })
+        result = server.inspect_material_function("/Game/MF_Blend")
+
+        assert "Description: Blends two inputs" in result
+        assert "Inputs (2)" in result
+        assert "Base (Float3)" in result
+        assert "Outputs (1)" in result
+        assert "Result (Float3)" in result
+        assert "[Lerp]" in result
+        assert "[Multiply]" in result
+        # FunctionInput/FunctionOutput should be excluded from expressions
+        assert "FunctionInput" not in result
+        assert "FunctionOutput" not in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_error_expression_not_found(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Expression 'MF_Missing' not found",
+        })
+        result = server.inspect_material_function("/Game/M_Foo", function_name="MF_Missing")
+
+        assert "Error:" in result
+        assert "not found" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 9: get_material_instance_chain
+# ---------------------------------------------------------------------------
+
+class TestGetMaterialInstanceChain:
+    """Output formatting tests for get_material_instance_chain."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_chain(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/MI_Foo",
+            "chain": [
+                {
+                    "asset_path": "/Game/MI_Foo",
+                    "asset_type": "MaterialInstanceConstant",
+                    "overrides": [
+                        {"name": "Roughness", "value": 0.8},
+                        {"name": "Color", "value": "(1,0,0,1)"},
+                    ],
+                },
+                {
+                    "asset_path": "/Game/M_Base",
+                    "asset_type": "Material",
+                    "blend_mode": "Opaque",
+                    "shading_model": "DefaultLit",
+                },
+            ],
+            "children": [],
+        })
+        result = server.get_material_instance_chain("/Game/MI_Foo")
+
+        assert "[0]" in result
+        assert "[1]" in result
+        assert "Roughness = 0.8" in result
+        assert "Blend Mode: Opaque" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_with_children(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/MI_Foo",
+            "chain": [
+                {
+                    "asset_path": "/Game/MI_Foo",
+                    "asset_type": "MaterialInstanceConstant",
+                    "overrides": [],
+                },
+            ],
+            "children": ["/Game/MI_Child1", "/Game/MI_Child2"],
+        })
+        result = server.get_material_instance_chain("/Game/MI_Foo")
+
+        assert "Children (2)" in result
+        assert "/Game/MI_Child1" in result
+        assert "/Game/MI_Child2" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 10: compare_materials
+# ---------------------------------------------------------------------------
+
+class TestCompareMaterials:
+    """Output formatting tests for compare_materials."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_diff(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "path_a": "/Game/M_A",
+            "path_b": "/Game/M_B",
+            "only_a": ["Metallic"],
+            "only_b": ["Emissive"],
+            "changed": ["Roughness"],
+            "property_diff": {
+                "blend_mode": {"a": "Opaque", "b": "Translucent"},
+            },
+            "stats_diff": {
+                "ps_instructions": {"a": 50, "b": 120},
+            },
+            "expression_diff": {
+                "Add": {"a": 3, "b": 5},
+            },
+        })
+        result = server.compare_materials("/Game/M_A", "/Game/M_B")
+
+        assert "- Metallic" in result
+        assert "+ Emissive" in result
+        assert "~ Roughness" in result
+        assert "blend_mode" in result
+        assert "Opaque -> Translucent" in result
+        assert "ps_instructions" in result
+        assert "Add" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_identical_materials(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "path_a": "/Game/M_A",
+            "path_b": "/Game/M_B",
+            "only_a": [],
+            "only_b": [],
+            "changed": [],
+            "property_diff": {},
+            "stats_diff": {},
+            "expression_diff": {},
+        })
+        result = server.compare_materials("/Game/M_A", "/Game/M_B")
+
+        assert "identical" in result

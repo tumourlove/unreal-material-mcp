@@ -1,4 +1,4 @@
-"""MCP server with 5 tools for UE Material graph intelligence."""
+"""MCP server with 10 tools for UE Material graph intelligence."""
 
 from __future__ import annotations
 
@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     "unreal-material",
     instructions=(
-        "Provides read-only intelligence for Unreal Engine material graphs. "
+        "Provides intelligence and editing tools for Unreal Engine material graphs. "
         "Use these tools to inspect material properties, parameters, node graphs, "
-        "and search for materials in an Unreal project."
+        "search for materials, analyze performance, compare materials, "
+        "edit material instances, and modify material graphs in an Unreal project."
     ),
 )
 
@@ -454,6 +455,293 @@ def search_materials(
         if "shading_model" in r:
             line += f" [shading_model={r['shading_model']}]"
         lines.append(line)
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 6: get_material_stats
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_material_stats(asset_path: str) -> str:
+    """Get shader compilation statistics and performance warnings for a material.
+
+    Returns shader instruction counts, sampler usage, texture samples,
+    UV scalars, interpolator scalars, and any performance warnings.
+
+    Args:
+        asset_path: Unreal asset path, e.g. '/Game/Materials/M_Foo'
+    """
+    script = (
+        f"result = material_helpers.get_stats('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Material: {data.get('asset_path', asset_path)}",
+        f"  Shader Instructions: VS={data.get('vs_instructions', 'N/A')} PS={data.get('ps_instructions', 'N/A')}",
+        f"  Samplers: {data.get('samplers', 'N/A')}",
+        f"  Texture Samples: {data.get('texture_samples', 'N/A')}",
+        f"  UV Scalars: {data.get('uv_scalars', 'N/A')}",
+        f"  Interpolator Scalars: {data.get('interpolator_scalars', 'N/A')}",
+    ]
+
+    warnings = data.get("warnings", [])
+    if warnings:
+        lines.append("  Warnings:")
+        for w in warnings:
+            lines.append(f"    - {w}")
+    else:
+        lines.append("  No warnings.")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 7: get_material_dependencies
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_material_dependencies(asset_path: str) -> str:
+    """List textures, material functions, and parameter sources used by a material.
+
+    Args:
+        asset_path: Unreal asset path, e.g. '/Game/Materials/M_Foo'
+    """
+    script = (
+        f"result = material_helpers.get_dependencies('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [f"Material: {data.get('asset_path', asset_path)}"]
+
+    textures = data.get("textures", [])
+    lines.append(f"  Textures ({len(textures)}):")
+    if textures:
+        for t in textures:
+            lines.append(f"    {t}")
+    else:
+        lines.append("    (none)")
+
+    functions = data.get("functions", [])
+    lines.append(f"  Material Functions ({len(functions)}):")
+    if functions:
+        for f in functions:
+            expr = f.get("expression", "?")
+            fpath = f.get("function_path", "?")
+            lines.append(f"    {expr} -> {fpath}")
+    else:
+        lines.append("    (none)")
+
+    sources = data.get("parameter_sources", [])
+    lines.append(f"  Parameter Sources ({len(sources)}):")
+    if sources:
+        for s in sources:
+            lines.append(f"    {s}")
+    else:
+        lines.append("    (none)")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 8: inspect_material_function
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def inspect_material_function(asset_path: str, function_name: str | None = None) -> str:
+    """Inspect a material function asset or a function call within a material.
+
+    If function_name is given, looks up that specific function call expression.
+    Otherwise inspects the material function asset directly.
+
+    Args:
+        asset_path: Unreal asset path, e.g. '/Game/Functions/MF_Foo'
+        function_name: Optional function expression name within a material
+    """
+    if function_name:
+        fn_arg = f"'{_escape_py_string(function_name)}'"
+    else:
+        fn_arg = "None"
+
+    script = (
+        f"result = material_helpers.inspect_function("
+        f"'{_escape_py_string(asset_path)}', function_name={fn_arg})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Function: {data.get('function_path', asset_path)}",
+        f"  Description: {data.get('description', '(none)')}",
+        f"  Caption: {data.get('caption', '(none)')}",
+        f"  Expression Count: {data.get('expression_count', 'N/A')}",
+    ]
+
+    inputs = data.get("inputs", [])
+    lines.append(f"  Inputs ({len(inputs)}):")
+    for inp in inputs:
+        lines.append(f"    {inp.get('name', '?')} ({inp.get('type', '?')})")
+
+    outputs = data.get("outputs", [])
+    lines.append(f"  Outputs ({len(outputs)}):")
+    for out in outputs:
+        lines.append(f"    {out.get('name', '?')} ({out.get('type', '?')})")
+
+    # Expression graph grouped by class (excluding FunctionInput/FunctionOutput)
+    expressions = data.get("expressions", [])
+    groups: dict[str, list] = {}
+    for expr in expressions:
+        cls = expr.get("class", "Unknown")
+        if cls in ("FunctionInput", "FunctionOutput"):
+            continue
+        groups.setdefault(cls, []).append(expr)
+
+    if groups:
+        lines.append("  Expressions:")
+        for cls in sorted(groups.keys()):
+            items = groups[cls]
+            lines.append(f"    [{cls}] ({len(items)})")
+            for expr in items:
+                lines.append(f"      {expr.get('name', '?')}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 9: get_material_instance_chain
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_material_instance_chain(asset_path: str) -> str:
+    """Walk the parent chain of a material instance up to the root material.
+
+    Shows parameter overrides at each level and lists child instances.
+
+    Args:
+        asset_path: Unreal asset path, e.g. '/Game/Materials/MI_Foo'
+    """
+    script = (
+        f"result = material_helpers.get_instance_chain('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    chain = data.get("chain", [])
+    lines = [f"Instance Chain: {data.get('asset_path', asset_path)}"]
+
+    for i, level in enumerate(chain):
+        indent = "  " * (i + 1)
+        path = level.get("asset_path", "?")
+        asset_type = level.get("asset_type", "?")
+        lines.append(f"  [{i}] {path} ({asset_type})")
+
+        if asset_type == "MaterialInstanceConstant":
+            overrides = level.get("overrides", [])
+            if overrides:
+                display_limit = 20
+                for ov in overrides[:display_limit]:
+                    lines.append(f"{indent}  {ov.get('name', '?')} = {ov.get('value', '?')}")
+                if len(overrides) > display_limit:
+                    lines.append(f"{indent}  ... and {len(overrides) - display_limit} more")
+        else:
+            # Root material
+            if "blend_mode" in level:
+                lines.append(f"{indent}  Blend Mode: {level['blend_mode']}")
+            if "shading_model" in level:
+                lines.append(f"{indent}  Shading Model: {level['shading_model']}")
+
+    children = data.get("children", [])
+    if children:
+        lines.append(f"  Children ({len(children)}):")
+        for c in children:
+            lines.append(f"    {c}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 10: compare_materials
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def compare_materials(asset_path_a: str, asset_path_b: str) -> str:
+    """Compare two materials side-by-side.
+
+    Shows parameters only in A, only in B, and changed between them,
+    plus differences in properties, stats, and expression counts.
+
+    Args:
+        asset_path_a: Unreal asset path for the first material
+        asset_path_b: Unreal asset path for the second material
+    """
+    script = (
+        f"result = material_helpers.compare_materials("
+        f"'{_escape_py_string(asset_path_a)}', '{_escape_py_string(asset_path_b)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Compare: {data.get('path_a', asset_path_a)}",
+        f"     vs: {data.get('path_b', asset_path_b)}",
+    ]
+
+    only_a = data.get("only_a", [])
+    only_b = data.get("only_b", [])
+    changed = data.get("changed", [])
+
+    if only_a or only_b or changed:
+        lines.append("  Parameters:")
+        for name in only_a:
+            lines.append(f"    - {name}")
+        for name in only_b:
+            lines.append(f"    + {name}")
+        for name in changed:
+            lines.append(f"    ~ {name}")
+    else:
+        lines.append("  Parameters: identical")
+
+    prop_diff = data.get("property_diff", {})
+    if prop_diff:
+        lines.append("  Property Differences:")
+        for key, vals in prop_diff.items():
+            lines.append(f"    {key}: {vals.get('a', 'N/A')} -> {vals.get('b', 'N/A')}")
+
+    stats_diff = data.get("stats_diff", {})
+    if stats_diff:
+        lines.append("  Stats Differences:")
+        for key, vals in stats_diff.items():
+            lines.append(f"    {key}: {vals.get('a', 'N/A')} -> {vals.get('b', 'N/A')}")
+
+    expr_diff = data.get("expression_diff", {})
+    if expr_diff:
+        lines.append("  Expression Differences:")
+        for key, vals in expr_diff.items():
+            lines.append(f"    {key}: {vals.get('a', 0)} -> {vals.get('b', 0)}")
 
     return "\n".join(lines)
 
