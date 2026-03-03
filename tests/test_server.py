@@ -367,12 +367,16 @@ class TestGetMaterialStats:
         _setup_tool_mock({
             "success": True,
             "asset_path": "/Game/M_Heavy",
-            "vs_instructions": 50,
-            "ps_instructions": 600,
-            "samplers": 18,
-            "texture_samples": 20,
-            "uv_scalars": 4,
-            "interpolator_scalars": 8,
+            "stats": {
+                "num_vertex_shader_instructions": 50,
+                "num_pixel_shader_instructions": 600,
+                "num_samplers": 18,
+                "num_pixel_texture_samples": 12,
+                "num_vertex_texture_samples": 0,
+                "num_virtual_texture_samples": 2,
+                "num_uv_scalars": 4,
+                "num_interpolator_scalars": 8,
+            },
             "warnings": ["High sampler count", "High pixel shader instructions"],
         })
         result = server.get_material_stats("/Game/M_Heavy")
@@ -387,12 +391,16 @@ class TestGetMaterialStats:
         _setup_tool_mock({
             "success": True,
             "asset_path": "/Game/M_Simple",
-            "vs_instructions": 20,
-            "ps_instructions": 30,
-            "samplers": 2,
-            "texture_samples": 2,
-            "uv_scalars": 1,
-            "interpolator_scalars": 2,
+            "stats": {
+                "num_vertex_shader_instructions": 20,
+                "num_pixel_shader_instructions": 30,
+                "num_samplers": 2,
+                "num_pixel_texture_samples": 2,
+                "num_vertex_texture_samples": 0,
+                "num_virtual_texture_samples": 0,
+                "num_uv_scalars": 1,
+                "num_interpolator_scalars": 2,
+            },
             "warnings": [],
         })
         result = server.get_material_stats("/Game/M_Simple")

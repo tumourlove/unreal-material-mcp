@@ -483,13 +483,14 @@ def get_material_stats(asset_path: str) -> str:
     if err:
         return f"Error: {err}"
 
+    stats = data.get("stats", {})
     lines = [
         f"Material: {data.get('asset_path', asset_path)}",
-        f"  Shader Instructions: VS={data.get('vs_instructions', 'N/A')} PS={data.get('ps_instructions', 'N/A')}",
-        f"  Samplers: {data.get('samplers', 'N/A')}",
-        f"  Texture Samples: {data.get('texture_samples', 'N/A')}",
-        f"  UV Scalars: {data.get('uv_scalars', 'N/A')}",
-        f"  Interpolator Scalars: {data.get('interpolator_scalars', 'N/A')}",
+        f"  Shader Instructions: VS={stats.get('num_vertex_shader_instructions', 'N/A')} PS={stats.get('num_pixel_shader_instructions', 'N/A')}",
+        f"  Samplers: {stats.get('num_samplers', 'N/A')}",
+        f"  Texture Samples: pixel={stats.get('num_pixel_texture_samples', 'N/A')} vertex={stats.get('num_vertex_texture_samples', 'N/A')} VT={stats.get('num_virtual_texture_samples', 'N/A')}",
+        f"  UV Scalars: {stats.get('num_uv_scalars', 'N/A')}",
+        f"  Interpolator Scalars: {stats.get('num_interpolator_scalars', 'N/A')}",
     ]
 
     warnings = data.get("warnings", [])
