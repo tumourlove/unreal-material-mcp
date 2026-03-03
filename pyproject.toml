@@ -1,0 +1,28 @@
+[project]
+name = "unreal-material-mcp"
+version = "0.1.0"
+description = "Material graph intelligence for Unreal Engine AI development via MCP"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+unreal-material-mcp = "unreal_material_mcp.__main__:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/unreal_material_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
