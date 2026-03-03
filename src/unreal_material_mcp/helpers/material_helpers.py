@@ -37,29 +37,45 @@ KNOWN_EXPRESSION_CLASSES = [
     # Math
     "Add", "Subtract", "Multiply", "Divide", "Clamp", "OneMinus", "Power",
     "Abs", "Floor", "Ceil", "Frac", "Fmod", "Min", "Max", "Dot", "CrossProduct",
-    "Saturate",
+    "Saturate", "Round", "Truncate", "Sign", "SquareRoot", "Length",
+    "Cosine", "Sine", "Tangent", "Arcsine", "Arccosine", "Arctangent",
+    "Arctangent2", "Exponential", "Exponential2", "Logarithm",
+    "InverseLinearInterpolate", "Step", "SmoothStep",
     # Vector ops
     "ComponentMask", "AppendVector", "Normalize", "TransformPosition",
     "TransformVector", "BreakMaterialAttributes", "MakeMaterialAttributes",
+    "GetMaterialAttributes", "BlendMaterialAttributes", "DeriveNormalZ",
+    "CrossProduct", "DotProduct",
     # Parameters
     "ScalarParameter", "VectorParameter", "TextureSampleParameter2D",
     "TextureSampleParameter2DArray", "TextureObjectParameter",
     "StaticSwitchParameter", "StaticBoolParameter",
-    "ChannelMaskParameterColor",
+    "ChannelMaskParameterColor", "CollectionParameter",
     # Constants
     "Constant", "Constant2Vector", "Constant3Vector", "Constant4Vector",
-    "StaticBool",
+    "StaticBool", "ConstantBiasScale",
     # Texture
-    "TextureSample", "TextureCoordinate",
+    "TextureSample", "TextureCoordinate", "TextureObject",
     # Utility / misc
-    "LinearInterpolate", "If", "Custom", "MaterialFunctionCall", "Comment",
+    "LinearInterpolate", "If", "IfThenElse", "Custom", "MaterialFunctionCall",
+    "Comment", "NamedRerouteDeclaration", "NamedRerouteUsage",
     "VertexColor", "Time", "Fresnel", "DepthFade", "WorldPosition",
     "PixelDepth", "SceneDepth", "ScreenPosition",
-    "DepthOfFieldFunction", "SphereMask", "Distance",
+    "DepthOfFieldFunction", "SphereMask", "Distance", "DistanceCullFade",
     "CameraPositionWS", "ActorPositionWS", "ObjectRadius",
     "Panner", "Rotator", "Desaturation",
     "CameraVectorWS", "PixelNormalWS", "VertexNormalWS",
     "TwoSidedSign", "ObjectPositionWS",
+    "BumpOffset", "BlackBody", "HsvToRgb",
+    "FunctionInput", "FunctionOutput",
+    "FeatureLevelSwitch", "QualitySwitch", "ShadingPathSwitch",
+    "DynamicParameter", "ParticleColor", "ParticlePositionWS",
+    "CustomOutput", "VertexInterpolator",
+    "DDX", "DDY", "Noise",
+    "GIReplace", "LightmassReplace",
+    "SceneColor", "SceneTexture",
+    "DecalDerivative", "DecalMipmapLevel",
+    "PerInstanceRandom", "PerInstanceFadeAmount", "PerInstanceCustomData",
 ]
 
 # Material output properties we can trace from.
@@ -86,11 +102,19 @@ _MATERIAL_PROPERTIES = [
 # ---------------------------------------------------------------------------
 
 def _safe_enum_name(value):
-    """Return the display name of a UE enum value, or str(value) as fallback."""
+    """Return the display name of a UE enum value, or str(value) as fallback.
+
+    UE Python enums str() as '<BlendMode.BLEND_MASKED: 1>' — we extract 'BLEND_MASKED'.
+    """
     try:
-        # Unreal Python enums usually have a .name attribute or str() works.
         name = str(value)
-        # Strip the enum class prefix if present (e.g. 'BlendMode.BLEND_Opaque')
+        # Strip angle brackets: '<BlendMode.BLEND_MASKED: 1>' -> 'BlendMode.BLEND_MASKED: 1'
+        if name.startswith("<") and name.endswith(">"):
+            name = name[1:-1]
+        # Strip the value suffix: 'BlendMode.BLEND_MASKED: 1' -> 'BlendMode.BLEND_MASKED'
+        if ": " in name:
+            name = name.rsplit(": ", 1)[0]
+        # Strip the enum class prefix: 'BlendMode.BLEND_MASKED' -> 'BLEND_MASKED'
         if "." in name:
             name = name.rsplit(".", 1)[-1]
         return name
@@ -493,25 +517,25 @@ def scan_all_expressions(asset_path, class_filter=None):
 
         found = []
         found_count = 0
-        MAX_INDEX = 200  # safety cap per class
+        # Max index per class. Expression indices can have large gaps (deleted
+        # nodes leave holes) so we scan broadly.  200 is generous but keeps
+        # total find_object calls manageable (~100 classes * 200 = 20k).
+        MAX_INDEX = 200
 
         for cls_name in classes_to_scan:
+            consecutive_misses = 0
             for i in range(MAX_INDEX):
                 obj_path = f"{full_path}:MaterialExpression{cls_name}_{i}"
                 expr = unreal.find_object(None, obj_path)
                 if expr is None:
-                    # After 3 consecutive misses we assume this class is exhausted.
-                    # But indices may have gaps, so allow some slack.
-                    lookahead_miss = True
-                    for la in range(1, 4):
-                        la_path = f"{full_path}:MaterialExpression{cls_name}_{i + la}"
-                        if unreal.find_object(None, la_path) is not None:
-                            lookahead_miss = False
-                            break
-                    if lookahead_miss:
+                    consecutive_misses += 1
+                    # After 30 consecutive misses, assume this class is done.
+                    # High enough to survive typical gaps from deleted nodes.
+                    if consecutive_misses >= 30:
                         break
                     continue
 
+                consecutive_misses = 0
                 found_count += 1
                 entry = {
                     "class": cls_name,

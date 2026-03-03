@@ -122,9 +122,15 @@ def _run_material_script(script_body: str) -> dict:
     # The bridge returns a dict with 'output' or 'result' containing printed text.
     output = result.get("output", "") or result.get("result", "") or ""
 
-    # Handle list output (some bridge versions return a list of lines)
+    # Handle list output — UE remote execution returns [{'type': 'Info', 'output': '...'}]
     if isinstance(output, list):
-        output = "\n".join(str(line) for line in output)
+        parts = []
+        for item in output:
+            if isinstance(item, dict):
+                parts.append(item.get("output", str(item)))
+            else:
+                parts.append(str(item))
+        output = "\n".join(parts)
 
     output = str(output).strip()
 
