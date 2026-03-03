@@ -47,7 +47,7 @@ def _get_bridge() -> EditorBridge:
     """Return (and lazily create) the editor bridge singleton."""
     global _bridge
     if _bridge is None:
-        _bridge = EditorBridge()
+        _bridge = EditorBridge(auto_connect=False)
     return _bridge
 
 
