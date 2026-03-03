@@ -747,6 +747,292 @@ def compare_materials(asset_path_a: str, asset_path_b: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Tool 11: set_material_instance_parameter
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def set_material_instance_parameter(
+    asset_path: str,
+    parameter_name: str,
+    value: str,
+    parameter_type: str | None = None,
+) -> str:
+    """Set a parameter override on a material instance.
+
+    Args:
+        asset_path: Unreal asset path to a MaterialInstanceConstant
+        parameter_name: Name of the parameter to set
+        value: New value as a string (number, boolean, JSON dict for vectors)
+        parameter_type: Optional type hint ('Scalar', 'Vector', 'Texture', 'StaticSwitch')
+    """
+    # Parse value: try JSON first (handles vectors like {"r":1,"g":0,"b":0,"a":1}), fall back to raw string
+    try:
+        parsed_value = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        parsed_value = value
+
+    type_arg = f"'{_escape_py_string(parameter_type)}'" if parameter_type else "None"
+    value_repr = repr(parsed_value)
+
+    script = (
+        f"result = material_helpers.set_instance_parameter("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(parameter_name)}', "
+        f"{value_repr}, "
+        f"{type_arg})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    ptype = data.get("parameter_type", parameter_type or "Unknown")
+    lines = [
+        f"Material Instance: {data.get('asset_path', asset_path)}",
+        f"  Parameter: {data.get('parameter_name', parameter_name)} ({ptype})",
+        f"  Old Value: {data.get('old_value', 'N/A')}",
+        f"  New Value: {data.get('new_value', 'N/A')}",
+        "  Updated successfully.",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 12: create_material_expression
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def create_material_expression(
+    asset_path: str,
+    expression_class: str,
+    node_pos_x: int = 0,
+    node_pos_y: int = 0,
+    properties: str | None = None,
+) -> str:
+    """Create a new expression node in a material graph.
+
+    Args:
+        asset_path: Unreal asset path to a material
+        expression_class: Class name (e.g. 'ScalarParameter', 'TextureSample')
+        node_pos_x: X position in the graph editor
+        node_pos_y: Y position in the graph editor
+        properties: Optional JSON string of properties, e.g. '{"parameter_name": "Roughness"}'
+    """
+    if properties is not None:
+        try:
+            props_dict = json.loads(properties)
+        except (json.JSONDecodeError, TypeError):
+            return f"Error: Invalid JSON for properties: {properties}"
+        props_repr = repr(props_dict)
+    else:
+        props_repr = "None"
+
+    script = (
+        f"result = material_helpers.create_expression("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(expression_class)}', "
+        f"node_pos_x={node_pos_x}, node_pos_y={node_pos_y}, "
+        f"properties={props_repr})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    name = data.get("expression_name", "Unknown")
+    cls = data.get("expression_class", expression_class)
+    pos = data.get("position", {"x": node_pos_x, "y": node_pos_y})
+
+    lines = [
+        f"Created: {name} ({cls})",
+        f"  Position: ({pos.get('x', node_pos_x)}, {pos.get('y', node_pos_y)})",
+        f"  Material: {data.get('asset_path', asset_path)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 13: delete_material_expression
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def delete_material_expression(asset_path: str, expression_name: str) -> str:
+    """Delete an expression node from a material graph.
+
+    Args:
+        asset_path: Unreal asset path to a material
+        expression_name: Name of the expression to delete
+    """
+    script = (
+        f"result = material_helpers.delete_expression("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(expression_name)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Deleted: {data.get('expression_name', expression_name)}",
+        f"  Material: {data.get('asset_path', asset_path)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 14: connect_material_expressions
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def connect_material_expressions(
+    asset_path: str,
+    from_expression: str,
+    to_expression_or_property: str,
+    from_output: str = "",
+    to_input: str = "",
+) -> str:
+    """Connect two expression nodes or connect an expression to a material property.
+
+    Args:
+        asset_path: Unreal asset path to a material
+        from_expression: Source expression name
+        to_expression_or_property: Target expression name or material property (e.g. 'BaseColor')
+        from_output: Output pin name on source (empty for default)
+        to_input: Input pin name on target (empty for default)
+    """
+    script = (
+        f"result = material_helpers.connect_expressions("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(from_expression)}', "
+        f"'{_escape_py_string(to_expression_or_property)}', "
+        f"from_output='{_escape_py_string(from_output)}', "
+        f"to_input='{_escape_py_string(to_input)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    conn = data.get("connection_string", f"{from_expression} -> {to_expression_or_property}")
+    conn_type = data.get("connection_type", "expression")
+
+    lines = [
+        f"Connected: {conn}",
+        f"  Type: {conn_type}",
+        f"  Material: {data.get('asset_path', asset_path)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 15: set_material_property
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def set_material_property(asset_path: str, property_name: str, value: str) -> str:
+    """Set a top-level material property (blend mode, shading model, usage flags, etc.).
+
+    Args:
+        asset_path: Unreal asset path to a material
+        property_name: Property name (e.g. 'blend_mode', 'two_sided', 'bUsedWithStaticLighting')
+        value: New value as a string
+    """
+    try:
+        parsed_value = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        parsed_value = value
+
+    value_repr = repr(parsed_value)
+
+    script = (
+        f"result = material_helpers.set_material_property("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(property_name)}', "
+        f"{value_repr})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    # Usage flag style response
+    if data.get("is_usage_flag"):
+        enabled = "enabled" if data.get("new_value") else "disabled"
+        lines = [
+            f"Material: {data.get('asset_path', asset_path)}",
+            f"  Usage {data.get('property_name', property_name)}: {enabled}",
+        ]
+    else:
+        lines = [
+            f"Material: {data.get('asset_path', asset_path)}",
+            f"  {data.get('property_name', property_name)}: "
+            f"{data.get('old_value', 'N/A')} -> {data.get('new_value', 'N/A')}",
+        ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 16: recompile_material
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def recompile_material(asset_path: str) -> str:
+    """Force-recompile a material's shaders.
+
+    Args:
+        asset_path: Unreal asset path to a material
+    """
+    script = (
+        f"result = material_helpers.recompile_material("
+        f"'{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    return f"Recompiled: {data.get('asset_path', asset_path)}"
+
+
+# ---------------------------------------------------------------------------
+# Tool 17: layout_material_graph
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def layout_material_graph(asset_path: str) -> str:
+    """Auto-layout the nodes in a material graph for readability.
+
+    Args:
+        asset_path: Unreal asset path to a material
+    """
+    script = (
+        f"result = material_helpers.layout_material_graph("
+        f"'{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    return f"Layout applied: {data.get('asset_path', asset_path)}"
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -605,3 +605,230 @@ class TestCompareMaterials:
         result = server.compare_materials("/Game/M_A", "/Game/M_B")
 
         assert "identical" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 11: set_material_instance_parameter
+# ---------------------------------------------------------------------------
+
+class TestSetMaterialInstanceParameter:
+    """Output formatting tests for set_material_instance_parameter."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_scalar_update(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/MI_Foo",
+            "parameter_name": "Roughness",
+            "parameter_type": "Scalar",
+            "old_value": 0.5,
+            "new_value": 0.8,
+        })
+        result = server.set_material_instance_parameter(
+            "/Game/MI_Foo", "Roughness", "0.8"
+        )
+
+        assert "Roughness" in result
+        assert "0.5" in result
+        assert "0.8" in result
+        assert "Updated successfully" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_error_not_instance(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Asset is not a MaterialInstanceConstant",
+        })
+        result = server.set_material_instance_parameter(
+            "/Game/M_Base", "Roughness", "0.5"
+        )
+
+        assert "Error:" in result
+        assert "MaterialInstanceConstant" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 12: create_material_expression
+# ---------------------------------------------------------------------------
+
+class TestCreateMaterialExpression:
+    """Output formatting tests for create_material_expression."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_created(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "expression_name": "MaterialExpressionScalarParameter_0",
+            "expression_class": "ScalarParameter",
+            "position": {"x": -400, "y": 200},
+        })
+        result = server.create_material_expression(
+            "/Game/M_Foo", "ScalarParameter", node_pos_x=-400, node_pos_y=200
+        )
+
+        assert "Created: MaterialExpressionScalarParameter_0" in result
+        assert "ScalarParameter" in result
+        assert "(-400, 200)" in result
+        assert "/Game/M_Foo" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_error_bad_class(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Unknown expression class 'FakeNode'",
+        })
+        result = server.create_material_expression("/Game/M_Foo", "FakeNode")
+
+        assert "Error:" in result
+        assert "Unknown expression class" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 13: delete_material_expression
+# ---------------------------------------------------------------------------
+
+class TestDeleteMaterialExpression:
+    """Output formatting tests for delete_material_expression."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_deleted(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "expression_name": "MaterialExpressionAdd_0",
+        })
+        result = server.delete_material_expression("/Game/M_Foo", "MaterialExpressionAdd_0")
+
+        assert "Deleted:" in result
+        assert "MaterialExpressionAdd_0" in result
+        assert "/Game/M_Foo" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_error_not_found(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Expression 'Missing_0' not found",
+        })
+        result = server.delete_material_expression("/Game/M_Foo", "Missing_0")
+
+        assert "Error:" in result
+        assert "not found" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 14: connect_material_expressions
+# ---------------------------------------------------------------------------
+
+class TestConnectMaterialExpressions:
+    """Output formatting tests for connect_material_expressions."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_expression_to_expression(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "connection_string": "Multiply_0:Out -> Add_0:A",
+            "connection_type": "expression",
+        })
+        result = server.connect_material_expressions(
+            "/Game/M_Foo", "Multiply_0", "Add_0",
+            from_output="Out", to_input="A",
+        )
+
+        assert "Connected:" in result
+        assert "Multiply_0:Out -> Add_0:A" in result
+        assert "Type: expression" in result
+        assert "/Game/M_Foo" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_expression_to_property(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "connection_string": "TextureSample_0:RGB -> BaseColor",
+            "connection_type": "property",
+        })
+        result = server.connect_material_expressions(
+            "/Game/M_Foo", "TextureSample_0", "BaseColor",
+            from_output="RGB",
+        )
+
+        assert "Connected:" in result
+        assert "Type: property" in result
+        assert "BaseColor" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 15: set_material_property
+# ---------------------------------------------------------------------------
+
+class TestSetMaterialProperty:
+    """Output formatting tests for set_material_property."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_property_change(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "property_name": "blend_mode",
+            "old_value": "Opaque",
+            "new_value": "Translucent",
+        })
+        result = server.set_material_property("/Game/M_Foo", "blend_mode", '"Translucent"')
+
+        assert "blend_mode" in result
+        assert "Opaque" in result
+        assert "Translucent" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_error_bad_property(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Unknown property 'fake_prop'",
+        })
+        result = server.set_material_property("/Game/M_Foo", "fake_prop", "1")
+
+        assert "Error:" in result
+        assert "Unknown property" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 16 & 17: recompile_material & layout_material_graph
+# ---------------------------------------------------------------------------
+
+class TestRecompileAndLayout:
+    """Output formatting tests for recompile_material and layout_material_graph."""
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_recompile(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+        })
+        result = server.recompile_material("/Game/M_Foo")
+
+        assert "Recompiled" in result
+        assert "/Game/M_Foo" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_layout(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+        })
+        result = server.layout_material_graph("/Game/M_Foo")
+
+        assert "Layout applied" in result
+        assert "/Game/M_Foo" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_recompile_error_on_instance(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Cannot recompile a MaterialInstanceConstant",
+        })
+        result = server.recompile_material("/Game/MI_Foo")
+
+        assert "Error:" in result
+        assert "MaterialInstanceConstant" in result
