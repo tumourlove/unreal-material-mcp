@@ -1470,3 +1470,482 @@ def compare_materials(path_a, path_b):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ===========================================================================
+# WRITE HELPERS — Instance Editing + Graph Editing
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# W1. set_instance_parameter
+# ---------------------------------------------------------------------------
+
+def set_instance_parameter(asset_path, parameter_name, value, parameter_type=None):
+    """Set a parameter override on a MaterialInstanceConstant.
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a MaterialInstanceConstant asset.
+    parameter_name : str
+        The parameter name to set.
+    value
+        The new value. Interpretation depends on *parameter_type*.
+    parameter_type : str or None
+        One of ``"Scalar"``, ``"Vector"``, ``"Texture"``, ``"StaticSwitch"``.
+        If ``None``, auto-detected by checking which getter lists contain the name.
+
+    Returns
+    -------
+    str
+        JSON with old and new values.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if not _is_material_instance(mat):
+            return _error_json(f"Asset is not a MaterialInstanceConstant: {asset_path}")
+
+        mel = _mel()
+
+        # Auto-detect parameter type if not provided
+        if parameter_type is None:
+            type_getters = [
+                ("Scalar", mel.get_scalar_parameter_names),
+                ("Vector", mel.get_vector_parameter_names),
+                ("Texture", mel.get_texture_parameter_names),
+                ("StaticSwitch", mel.get_static_switch_parameter_names),
+            ]
+            for ptype, getter in type_getters:
+                try:
+                    names = getter(mat)
+                    if parameter_name in [str(n) for n in names]:
+                        parameter_type = ptype
+                        break
+                except Exception:
+                    continue
+            if parameter_type is None:
+                return _error_json(
+                    f"Parameter '{parameter_name}' not found on {asset_path}"
+                )
+
+        parameter_type_upper = parameter_type.upper()
+
+        if parameter_type_upper == "SCALAR":
+            old_value = mel.get_material_instance_scalar_parameter_value(mat, parameter_name)
+            new_val = float(value)
+            mel.set_material_instance_scalar_parameter_value(mat, parameter_name, new_val)
+            old_repr = float(old_value)
+            new_repr = new_val
+
+        elif parameter_type_upper == "VECTOR":
+            old_lc = mel.get_material_instance_vector_parameter_value(mat, parameter_name)
+            old_repr = {"r": float(old_lc.r), "g": float(old_lc.g),
+                        "b": float(old_lc.b), "a": float(old_lc.a)}
+            if isinstance(value, dict):
+                lc = unreal.LinearColor(
+                    r=float(value.get("r", 0)),
+                    g=float(value.get("g", 0)),
+                    b=float(value.get("b", 0)),
+                    a=float(value.get("a", 1)),
+                )
+            else:
+                return _error_json("Vector value must be a dict with r/g/b/a keys")
+            mel.set_material_instance_vector_parameter_value(mat, parameter_name, lc)
+            new_repr = {"r": float(lc.r), "g": float(lc.g),
+                        "b": float(lc.b), "a": float(lc.a)}
+
+        elif parameter_type_upper == "TEXTURE":
+            old_tex = mel.get_material_instance_texture_parameter_value(mat, parameter_name)
+            old_repr = str(old_tex.get_path_name()) if old_tex else None
+            tex = _eal().load_asset(str(value))
+            if tex is None:
+                return _error_json(f"Texture asset not found: {value}")
+            mel.set_material_instance_texture_parameter_value(mat, parameter_name, tex)
+            new_repr = str(value)
+
+        elif parameter_type_upper == "STATICSWITCH":
+            old_value = mel.get_material_instance_static_switch_parameter_value(
+                mat, parameter_name
+            )
+            old_repr = bool(old_value)
+            new_val = bool(value) if isinstance(value, bool) else str(value).lower() in (
+                "true", "1", "yes"
+            )
+            mel.set_material_instance_static_switch_parameter_value(
+                mat, parameter_name, new_val
+            )
+            new_repr = new_val
+
+        else:
+            return _error_json(f"Unknown parameter_type: {parameter_type}")
+
+        mel.update_material_instance(mat)
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "parameter_name": parameter_name,
+            "parameter_type": parameter_type,
+            "old_value": old_repr,
+            "new_value": new_repr,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W2. create_expression
+# ---------------------------------------------------------------------------
+
+def create_expression(asset_path, expression_class, node_pos_x=0, node_pos_y=0,
+                      properties=None):
+    """Create a new material expression node in a base material.
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a base Material asset.
+    expression_class : str
+        Short class name (e.g. ``"Multiply"``). Prefixed with ``MaterialExpression`` automatically.
+    node_pos_x, node_pos_y : int
+        Editor graph position.
+    properties : dict or None
+        Optional dict of editor properties to set on the new node.
+
+    Returns
+    -------
+    str
+        JSON with the created expression info.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json(
+                "Cannot create expressions on a MaterialInstanceConstant. "
+                "Use a base Material."
+            )
+
+        # Resolve expression class
+        full_class_name = f"MaterialExpression{expression_class}"
+        expr_class = getattr(unreal, full_class_name, None)
+        if expr_class is None:
+            return _error_json(f"Unknown expression class: {full_class_name}")
+
+        expr = _mel().create_material_expression(
+            mat, expr_class, int(node_pos_x), int(node_pos_y)
+        )
+
+        # Set optional properties
+        failed_props = {}
+        if properties:
+            for prop_name, prop_value in properties.items():
+                try:
+                    expr.set_editor_property(prop_name, prop_value)
+                except Exception as prop_exc:
+                    failed_props[prop_name] = str(prop_exc)
+
+        result = {
+            "success": True,
+            "asset_path": asset_path,
+            "expression_name": _expr_id(expr),
+            "expression_class": expression_class,
+            "position": {"x": int(node_pos_x), "y": int(node_pos_y)},
+        }
+        if failed_props:
+            result["failed_properties"] = failed_props
+
+        return json.dumps(result)
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W3. delete_expression
+# ---------------------------------------------------------------------------
+
+def delete_expression(asset_path, expression_name):
+    """Delete a material expression node from a base material.
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a base Material asset.
+    expression_name : str
+        The expression object name (e.g. ``"MaterialExpressionMultiply_0"``).
+        The ``MaterialExpression`` prefix is added automatically if missing.
+
+    Returns
+    -------
+    str
+        JSON confirmation.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json(
+                "Cannot delete expressions on a MaterialInstanceConstant."
+            )
+
+        full_path = _full_object_path(asset_path)
+
+        if not expression_name.startswith("MaterialExpression"):
+            expression_name = f"MaterialExpression{expression_name}"
+
+        obj_path = f"{full_path}:{expression_name}"
+        expr = unreal.find_object(None, obj_path)
+        if expr is None:
+            return _error_json(f"Expression not found: {obj_path}")
+
+        _mel().delete_material_expression(mat, expr)
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "deleted": expression_name,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W4. connect_expressions
+# ---------------------------------------------------------------------------
+
+def connect_expressions(asset_path, from_expression, to_expression_or_property,
+                        from_output="", to_input=""):
+    """Connect two expression nodes, or connect an expression to a material property pin.
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a base Material asset.
+    from_expression : str
+        Source expression object name.
+    to_expression_or_property : str
+        Target expression name **or** material property label (e.g. ``"BaseColor"``).
+    from_output : str
+        Output pin name on the source expression (empty for default).
+    to_input : str
+        Input pin name on the target expression (empty for default).
+
+    Returns
+    -------
+    str
+        JSON with connection details.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json(
+                "Cannot connect expressions on a MaterialInstanceConstant."
+            )
+
+        mel = _mel()
+        full_path = _full_object_path(asset_path)
+
+        # Resolve source expression
+        from_name = from_expression
+        if not from_name.startswith("MaterialExpression"):
+            from_name = f"MaterialExpression{from_name}"
+        from_expr = unreal.find_object(None, f"{full_path}:{from_name}")
+        if from_expr is None:
+            return _error_json(f"Source expression not found: {from_name}")
+
+        # Build property lookup: lowercased label -> enum attr name
+        prop_map = {label.lower(): attr for label, attr in _MATERIAL_PROPERTIES}
+        target_lower = to_expression_or_property.lower()
+
+        if target_lower in prop_map:
+            # Connect to material property pin
+            prop_enum = getattr(unreal.MaterialProperty, prop_map[target_lower])
+            ok = mel.connect_material_property(from_expr, from_output, prop_enum)
+            conn_str = f"{from_name}[{from_output}] -> {to_expression_or_property}"
+            return json.dumps({
+                "success": bool(ok),
+                "asset_path": asset_path,
+                "connection": conn_str,
+                "type": "property",
+            })
+        else:
+            # Connect to another expression
+            to_name = to_expression_or_property
+            if not to_name.startswith("MaterialExpression"):
+                to_name = f"MaterialExpression{to_name}"
+            to_expr = unreal.find_object(None, f"{full_path}:{to_name}")
+            if to_expr is None:
+                return _error_json(f"Target expression not found: {to_name}")
+
+            ok = mel.connect_material_expressions(
+                from_expr, from_output, to_expr, to_input
+            )
+            conn_str = (
+                f"{from_name}[{from_output}] -> {to_name}[{to_input}]"
+            )
+            return json.dumps({
+                "success": bool(ok),
+                "asset_path": asset_path,
+                "connection": conn_str,
+                "type": "expression",
+            })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W5. set_property
+# ---------------------------------------------------------------------------
+
+def set_property(asset_path, property_name, value):
+    """Set a top-level material property (blend mode, shading model, etc.).
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a base Material asset.
+    property_name : str
+        One of: ``blend_mode``, ``shading_model``, ``two_sided``,
+        ``material_domain``, or ``usage_*`` (e.g. ``usage_skeletal_mesh``).
+    value : str or bool
+        For enum properties, the enum member name (e.g. ``"BLEND_MASKED"``).
+        For ``two_sided``, a boolean.
+
+    Returns
+    -------
+    str
+        JSON with old and new values.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json(
+                "Cannot set material properties on a MaterialInstanceConstant. "
+                "Edit the parent material instead."
+            )
+
+        prop_lower = property_name.lower()
+
+        if prop_lower == "blend_mode":
+            old = _safe_enum_name(mat.get_editor_property("blend_mode"))
+            new_enum = getattr(unreal.BlendMode, value.upper())
+            mat.set_editor_property("blend_mode", new_enum)
+            new_repr = _safe_enum_name(new_enum)
+
+        elif prop_lower == "shading_model":
+            old = _safe_enum_name(mat.get_editor_property("shading_model"))
+            new_enum = getattr(unreal.MaterialShadingModel, value.upper())
+            mat.set_editor_property("shading_model", new_enum)
+            new_repr = _safe_enum_name(new_enum)
+
+        elif prop_lower == "two_sided":
+            old_val = mat.get_editor_property("two_sided")
+            old = str(old_val)
+            if isinstance(value, bool):
+                new_val = value
+            else:
+                new_val = str(value).lower() in ("true", "1", "yes")
+            mat.set_editor_property("two_sided", new_val)
+            new_repr = str(new_val)
+
+        elif prop_lower == "material_domain":
+            old = _safe_enum_name(mat.get_editor_property("material_domain"))
+            new_enum = getattr(unreal.MaterialDomain, value.upper())
+            mat.set_editor_property("material_domain", new_enum)
+            new_repr = _safe_enum_name(new_enum)
+
+        elif prop_lower.startswith("usage_"):
+            # e.g. usage_skeletal_mesh -> SKELETAL_MESH
+            usage_suffix = prop_lower[len("usage_"):].upper()
+            usage_enum = getattr(unreal.MaterialUsage, usage_suffix)
+            # set_material_usage returns the old value; just call it
+            old = "unknown"
+            try:
+                # Try to read the current usage flag
+                old = str(mat.get_editor_property(property_name))
+            except Exception:
+                pass
+            _mel().set_material_usage(mat, usage_enum, True)
+            new_repr = str(value)
+
+        else:
+            return _error_json(f"Unsupported property: {property_name}")
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "property": property_name,
+            "old_value": old,
+            "new_value": new_repr,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W6. recompile
+# ---------------------------------------------------------------------------
+
+def recompile(asset_path):
+    """Recompile a base material's shader.
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a base Material asset.
+
+    Returns
+    -------
+    str
+        JSON confirmation.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json(
+                "Cannot recompile a MaterialInstanceConstant directly. "
+                "Recompile its parent material instead."
+            )
+
+        _mel().recompile_material(mat)
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "recompiled": True,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W7. layout_graph
+# ---------------------------------------------------------------------------
+
+def layout_graph(asset_path):
+    """Auto-layout all expression nodes in a base material's graph.
+
+    Parameters
+    ----------
+    asset_path : str
+        Path to a base Material asset.
+
+    Returns
+    -------
+    str
+        JSON confirmation.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json(
+                "Cannot layout expressions on a MaterialInstanceConstant."
+            )
+
+        _mel().layout_material_expressions(mat)
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "laid_out": True,
+        })
+    except Exception as exc:
+        return _error_json(exc)
