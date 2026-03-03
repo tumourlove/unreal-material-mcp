@@ -168,6 +168,33 @@ class TestGetMaterialParameters:
         assert "UseDetail" in result
 
     @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_static_switch_with_value_and_controls(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "parameters": [
+                {
+                    "name": "UseDetail",
+                    "type": "StaticSwitch",
+                    "default": True,
+                    "controls": [
+                        {
+                            "expression": "MaterialExpressionIf_0",
+                            "true_input": "Multiply_3",
+                            "false_input": "Constant_2",
+                        }
+                    ],
+                },
+            ],
+        })
+        result = server.get_material_parameters("/Game/M_Foo")
+
+        assert "UseDetail" in result
+        assert "value=True" in result
+        assert "Controls:" in result
+        assert "MaterialExpressionIf_0" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
     def test_no_parameters(self, _src):
         _setup_tool_mock({
             "success": True,

@@ -251,7 +251,19 @@ def get_material_parameters(asset_path: str) -> str:
                 default_str = "(none)"
             else:
                 default_str = str(default)
-            lines.append(f"    {p['name']} = {default_str}")
+
+            # Static switch: show value= instead of = for clarity
+            if ptype == "StaticSwitch":
+                lines.append(f"    {p['name']} value={default_str}")
+                for ctrl in p.get("controls", []):
+                    true_in = ctrl.get("true_input", "?")
+                    false_in = ctrl.get("false_input", "?")
+                    lines.append(
+                        f"      Controls: {ctrl.get('expression', '?')} "
+                        f"(true→{true_in}, false→{false_in})"
+                    )
+            else:
+                lines.append(f"    {p['name']} = {default_str}")
 
     # Any remaining types
     for ptype, items in groups.items():

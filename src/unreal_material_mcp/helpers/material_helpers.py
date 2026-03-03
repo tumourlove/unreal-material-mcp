@@ -335,11 +335,43 @@ def get_all_parameters(asset_path):
                     )
                 except Exception:
                     default = None
-                params.append({
+
+                param_entry = {
                     "name": name_str,
                     "type": "StaticSwitch",
                     "default": default,
-                })
+                }
+
+                # Trace controls: find StaticSwitchParameter expressions
+                controls = []
+                if not _is_material_instance(mat):
+                    try:
+                        full_path = _full_object_path(asset_path)
+                        for i in range(200):
+                            obj_path = f"{full_path}:MaterialExpressionStaticSwitchParameter_{i}"
+                            expr = unreal.find_object(None, obj_path)
+                            if expr is None:
+                                if i > 30:
+                                    break
+                                continue
+                            try:
+                                pname = str(expr.get_editor_property("parameter_name"))
+                            except Exception:
+                                continue
+                            if pname != name_str:
+                                continue
+                            controls.append({
+                                "expression": _expr_id(expr),
+                                "position": _expr_position(expr),
+                            })
+                            break
+                    except Exception:
+                        pass
+
+                if controls:
+                    param_entry["controls"] = controls
+
+                params.append(param_entry)
         except Exception:
             pass
 
