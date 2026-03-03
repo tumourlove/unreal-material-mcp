@@ -823,3 +823,650 @@ def search_materials_in_path(base_path, query="", filter_type="name"):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# 6. get_stats
+# ---------------------------------------------------------------------------
+
+def get_stats(asset_path):
+    """Return material statistics, warnings, and disconnected-expression analysis.
+
+    Only works on base Materials (not MaterialInstanceConstant).
+
+    Returns
+    -------
+    str
+        JSON with ``success``, ``stats``, ``warnings``, and disconnected info.
+    """
+    try:
+        mat = _load_material(asset_path)
+
+        if _is_material_instance(mat):
+            return _error_json(
+                "get_stats is not supported on MaterialInstanceConstant. "
+                "Use the parent Material instead."
+            )
+
+        mel = _mel()
+        warnings = []
+
+        # --- Shader statistics ---
+        stats = {}
+        try:
+            s = mel.get_statistics(mat)
+            stats = {
+                "num_vertex_shader_instructions": int(s.num_vertex_shader_instructions),
+                "num_pixel_shader_instructions": int(s.num_pixel_shader_instructions),
+                "num_samplers": int(s.num_samplers),
+                "num_vertex_texture_samples": int(s.num_vertex_texture_samples),
+                "num_pixel_texture_samples": int(s.num_pixel_texture_samples),
+                "num_virtual_texture_samples": int(s.num_virtual_texture_samples),
+                "num_uv_scalars": int(s.num_uv_scalars),
+                "num_interpolator_scalars": int(s.num_interpolator_scalars),
+            }
+            if stats["num_samplers"] > 16:
+                warnings.append(
+                    f"Sampler count ({stats['num_samplers']}) exceeds limit of 16"
+                )
+            if stats["num_pixel_shader_instructions"] > 500:
+                warnings.append(
+                    f"Pixel shader instructions ({stats['num_pixel_shader_instructions']}) "
+                    "exceeds recommended maximum of 500"
+                )
+        except Exception as exc:
+            stats["error"] = str(exc)
+
+        # --- Disconnected expression analysis ---
+        # Get all expressions (excluding comments)
+        all_exprs_data = json.loads(scan_all_expressions(asset_path))
+        all_expr_names = set()
+        param_expr_names = set()
+        if all_exprs_data.get("success"):
+            for expr in all_exprs_data.get("expressions", []):
+                if expr.get("class") == "Comment":
+                    continue
+                name = expr.get("name")
+                if name:
+                    all_expr_names.add(name)
+                if "Parameter" in expr.get("class", ""):
+                    if name:
+                        param_expr_names.add(name)
+
+        # Get connected expressions by tracing from output pins
+        trace_data = json.loads(trace_connections(asset_path))
+        connected_names = set()
+        if trace_data.get("success"):
+            def _collect_names(node):
+                if node is None:
+                    return
+                n = node.get("name")
+                if n:
+                    connected_names.add(n)
+                for inp in node.get("inputs", []):
+                    _collect_names(inp.get("connected_node"))
+
+            # Trace from output pins
+            for _pin, tree in trace_data.get("output_pins", {}).items():
+                _collect_names(tree)
+            # Also handle single-tree mode
+            if "tree" in trace_data:
+                _collect_names(trace_data["tree"])
+
+        disconnected = sorted(all_expr_names - connected_names)
+        unused_params = sorted(param_expr_names - connected_names)
+
+        if unused_params:
+            warnings.append(
+                f"Unused parameter expressions: {', '.join(unused_params)}"
+            )
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "stats": stats,
+            "warnings": warnings,
+            "total_expressions": len(all_expr_names),
+            "connected_expressions": len(connected_names & all_expr_names),
+            "disconnected_expressions": disconnected,
+            "unused_parameters": unused_params,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# 7. get_dependencies
+# ---------------------------------------------------------------------------
+
+def get_dependencies(asset_path):
+    """Return textures, material functions, and parameter sources for a material.
+
+    Returns
+    -------
+    str
+        JSON with ``textures``, ``material_functions``, and ``parameter_sources``.
+    """
+    try:
+        mat = _load_material(asset_path)
+        mel = _mel()
+
+        # --- Textures ---
+        textures = []
+        try:
+            used = mel.get_used_textures(mat)
+            for tex in used:
+                try:
+                    textures.append(tex.get_path_name())
+                except Exception:
+                    textures.append(str(tex))
+        except Exception:
+            pass
+
+        # --- Material functions ---
+        material_functions = []
+        try:
+            fn_data = json.loads(
+                scan_all_expressions(asset_path, class_filter="MaterialFunctionCall")
+            )
+            if fn_data.get("success"):
+                for expr in fn_data.get("expressions", []):
+                    fn_path = expr.get("function")
+                    if fn_path and fn_path not in material_functions:
+                        material_functions.append(fn_path)
+        except Exception:
+            pass
+
+        # --- Parameter sources ---
+        parameter_sources = []
+        param_type_getters = {
+            "Scalar": "get_scalar_parameter_source",
+            "Vector": "get_vector_parameter_source",
+            "Texture": "get_texture_parameter_source",
+            "StaticSwitch": "get_static_switch_parameter_source",
+        }
+        param_name_getters = {
+            "Scalar": "get_scalar_parameter_names",
+            "Vector": "get_vector_parameter_names",
+            "Texture": "get_texture_parameter_names",
+            "StaticSwitch": "get_static_switch_parameter_names",
+        }
+        for ptype, source_getter_name in param_type_getters.items():
+            try:
+                names = getattr(mel, param_name_getters[ptype])(mat)
+                source_fn = getattr(mel, source_getter_name)
+                for name in names:
+                    name_str = str(name)
+                    try:
+                        found, source_path = source_fn(mat, name_str)
+                        parameter_sources.append({
+                            "name": name_str,
+                            "type": ptype,
+                            "found": bool(found),
+                            "source": str(source_path) if found else None,
+                        })
+                    except Exception:
+                        parameter_sources.append({
+                            "name": name_str,
+                            "type": ptype,
+                            "found": False,
+                            "source": None,
+                        })
+            except Exception:
+                pass
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "textures": textures,
+            "material_functions": material_functions,
+            "parameter_sources": parameter_sources,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# 8. inspect_function
+# ---------------------------------------------------------------------------
+
+def inspect_function(asset_path, function_name=None):
+    """Inspect a MaterialFunction asset or a MaterialFunctionCall in a material.
+
+    Parameters
+    ----------
+    asset_path : str
+        If *function_name* is given, this is the material containing the
+        function call.  Otherwise, this is the function asset path itself.
+    function_name : str or None
+        Name of a MaterialFunctionCall expression in the material (e.g.
+        ``"MaterialExpressionMaterialFunctionCall_0"``).
+
+    Returns
+    -------
+    str
+        JSON with function metadata, expressions, inputs, and outputs.
+    """
+    try:
+        mel = _mel()
+
+        if function_name is not None:
+            # Mode 1: asset_path is a material, function_name is an expression
+            mat = _load_material(asset_path)
+            full_path = _full_object_path(asset_path)
+
+            if not function_name.startswith("MaterialExpression"):
+                function_name = f"MaterialExpression{function_name}"
+            obj_path = f"{full_path}:{function_name}"
+            expr = unreal.find_object(None, obj_path)
+            if expr is None:
+                return _error_json(f"Expression not found: {obj_path}")
+
+            try:
+                fn = expr.get_editor_property("material_function")
+            except Exception:
+                return _error_json(
+                    f"Could not get material_function from {function_name}"
+                )
+            if fn is None:
+                return _error_json(f"No material function set on {function_name}")
+            fn_path = fn.get_path_name()
+        else:
+            # Mode 2: asset_path IS the function
+            fn = _eal().load_asset(asset_path)
+            if fn is None:
+                return _error_json(f"Function asset not found: {asset_path}")
+            fn_path = asset_path
+
+        # --- Function metadata ---
+        info = {
+            "function_path": fn_path,
+        }
+        try:
+            info["description"] = str(fn.get_editor_property("description"))
+        except Exception:
+            info["description"] = ""
+        try:
+            info["user_exposed_caption"] = str(
+                fn.get_editor_property("user_exposed_caption")
+            )
+        except Exception:
+            info["user_exposed_caption"] = ""
+
+        # Expression count
+        try:
+            info["expression_count"] = int(
+                mel.get_num_material_expressions_in_function(fn)
+            )
+        except Exception:
+            info["expression_count"] = -1
+
+        # --- Brute-force scan expressions inside the function ---
+        fn_full_path = _full_object_path(fn_path)
+        MAX_INDEX = 200
+        found = []
+        inputs_list = []
+        outputs_list = []
+
+        for cls_name in KNOWN_EXPRESSION_CLASSES:
+            consecutive_misses = 0
+            for i in range(MAX_INDEX):
+                obj_path = f"{fn_full_path}:MaterialExpression{cls_name}_{i}"
+                expr_obj = unreal.find_object(None, obj_path)
+                if expr_obj is None:
+                    consecutive_misses += 1
+                    if consecutive_misses >= 30:
+                        break
+                    continue
+
+                consecutive_misses = 0
+                entry = {
+                    "class": cls_name,
+                    "index": i,
+                    "name": _expr_id(expr_obj),
+                }
+                entry.update(_extract_expression_props(expr_obj, cls_name))
+                found.append(entry)
+
+                # Collect inputs/outputs for convenience
+                if cls_name == "FunctionInput":
+                    inp = {"name": _expr_id(expr_obj), "index": i}
+                    try:
+                        inp["input_name"] = str(
+                            expr_obj.get_editor_property("input_name")
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        inp["input_type"] = _safe_enum_name(
+                            expr_obj.get_editor_property("input_type")
+                        )
+                    except Exception:
+                        pass
+                    inputs_list.append(inp)
+                elif cls_name == "FunctionOutput":
+                    out = {"name": _expr_id(expr_obj), "index": i}
+                    try:
+                        out["output_name"] = str(
+                            expr_obj.get_editor_property("output_name")
+                        )
+                    except Exception:
+                        pass
+                    outputs_list.append(out)
+
+        info["found_expression_count"] = len(found)
+        info["expressions"] = found
+        info["inputs"] = inputs_list
+        info["outputs"] = outputs_list
+
+        return json.dumps({"success": True, "asset_path": asset_path, **info})
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# 9. get_instance_chain
+# ---------------------------------------------------------------------------
+
+def get_instance_chain(asset_path):
+    """Walk the parent chain of a material instance and list children.
+
+    Returns overridden parameters at each MI level and root material properties.
+
+    Returns
+    -------
+    str
+        JSON with ``chain`` (list of ancestors) and ``children``.
+    """
+    try:
+        mat = _load_material(asset_path)
+        mel = _mel()
+
+        chain = []
+        visited = set()
+        current = mat
+        current_path = asset_path
+
+        while current is not None:
+            if current_path in visited:
+                chain.append({
+                    "asset_path": current_path,
+                    "cycle_detected": True,
+                })
+                break
+            visited.add(current_path)
+
+            if _is_material_instance(current):
+                # Collect overridden parameters
+                overrides = []
+                # Scalar
+                try:
+                    for name in mel.get_scalar_parameter_names(current):
+                        name_str = str(name)
+                        try:
+                            val = float(
+                                mel.get_material_instance_scalar_parameter_value(
+                                    current, name_str
+                                )
+                            )
+                            overrides.append({
+                                "name": name_str,
+                                "type": "Scalar",
+                                "value": val,
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Vector
+                try:
+                    for name in mel.get_vector_parameter_names(current):
+                        name_str = str(name)
+                        try:
+                            v = mel.get_material_instance_vector_parameter_value(
+                                current, name_str
+                            )
+                            overrides.append({
+                                "name": name_str,
+                                "type": "Vector",
+                                "value": {"r": v.r, "g": v.g, "b": v.b, "a": v.a},
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Texture
+                try:
+                    for name in mel.get_texture_parameter_names(current):
+                        name_str = str(name)
+                        try:
+                            tex = mel.get_material_instance_texture_parameter_value(
+                                current, name_str
+                            )
+                            overrides.append({
+                                "name": name_str,
+                                "type": "Texture",
+                                "value": tex.get_path_name() if tex else None,
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Static switch
+                try:
+                    for name in mel.get_static_switch_parameter_names(current):
+                        name_str = str(name)
+                        try:
+                            val = bool(
+                                mel.get_material_instance_static_switch_parameter_value(
+                                    current, name_str
+                                )
+                            )
+                            overrides.append({
+                                "name": name_str,
+                                "type": "StaticSwitch",
+                                "value": val,
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                entry = {
+                    "asset_path": current_path,
+                    "asset_type": "MaterialInstanceConstant",
+                    "overrides": overrides,
+                }
+                chain.append(entry)
+
+                # Walk to parent
+                try:
+                    parent = current.get_editor_property("parent")
+                    if parent is not None:
+                        current_path = parent.get_path_name()
+                        current = parent
+                    else:
+                        current = None
+                except Exception:
+                    current = None
+            else:
+                # Root Material
+                entry = {
+                    "asset_path": current_path,
+                    "asset_type": "Material",
+                }
+                try:
+                    entry["blend_mode"] = _safe_enum_name(
+                        current.get_editor_property("blend_mode")
+                    )
+                except Exception:
+                    pass
+                try:
+                    entry["shading_model"] = _safe_enum_name(
+                        current.get_editor_property("shading_model")
+                    )
+                except Exception:
+                    pass
+                chain.append(entry)
+                current = None  # Root reached
+
+        # --- Children ---
+        children = []
+        try:
+            child_instances = mel.get_child_instances(mat)
+            for child in child_instances:
+                try:
+                    children.append({
+                        "package_name": str(child.package_name),
+                        "asset_name": str(child.asset_name),
+                    })
+                except Exception:
+                    children.append(str(child))
+        except Exception:
+            pass
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "chain": chain,
+            "children": children,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# 10. compare_materials
+# ---------------------------------------------------------------------------
+
+def compare_materials(path_a, path_b):
+    """Compare two materials side-by-side.
+
+    Diffs parameters, and for base materials also compares properties, stats,
+    and expression counts by class.
+
+    Returns
+    -------
+    str
+        JSON with ``parameter_diff``, ``property_diff``, ``stats_diff``,
+        and ``expression_diff``.
+    """
+    try:
+        mat_a = _load_material(path_a)
+        mat_b = _load_material(path_b)
+        mel = _mel()
+
+        # --- Parameter diff ---
+        params_a_data = json.loads(get_all_parameters(path_a))
+        params_b_data = json.loads(get_all_parameters(path_b))
+
+        params_a = {
+            p["name"]: p
+            for p in params_a_data.get("parameters", [])
+        } if params_a_data.get("success") else {}
+        params_b = {
+            p["name"]: p
+            for p in params_b_data.get("parameters", [])
+        } if params_b_data.get("success") else {}
+
+        only_a = sorted(set(params_a.keys()) - set(params_b.keys()))
+        only_b = sorted(set(params_b.keys()) - set(params_a.keys()))
+        common = sorted(set(params_a.keys()) & set(params_b.keys()))
+
+        changed = []
+        for name in common:
+            pa, pb = params_a[name], params_b[name]
+            if pa.get("type") != pb.get("type") or pa.get("default") != pb.get("default"):
+                changed.append({
+                    "name": name,
+                    "a": {"type": pa.get("type"), "default": pa.get("default")},
+                    "b": {"type": pb.get("type"), "default": pb.get("default")},
+                })
+
+        parameter_diff = {
+            "only_a": only_a,
+            "only_b": only_b,
+            "changed": changed,
+        }
+
+        # --- Property / stats / expression diff (base materials only) ---
+        property_diff = []
+        stats_diff = {}
+        expression_diff = {}
+
+        both_base = not _is_material_instance(mat_a) and not _is_material_instance(mat_b)
+
+        if both_base:
+            # Property comparison
+            for prop_name in ("blend_mode", "shading_model", "material_domain", "two_sided"):
+                try:
+                    val_a = mat_a.get_editor_property(prop_name)
+                    val_b = mat_b.get_editor_property(prop_name)
+                    str_a = _safe_enum_name(val_a) if not isinstance(val_a, bool) else str(val_a)
+                    str_b = _safe_enum_name(val_b) if not isinstance(val_b, bool) else str(val_b)
+                    if str_a != str_b:
+                        property_diff.append({
+                            "property": prop_name,
+                            "a": str_a,
+                            "b": str_b,
+                        })
+                except Exception:
+                    pass
+
+            # Stats comparison
+            try:
+                stat_fields = [
+                    "num_vertex_shader_instructions",
+                    "num_pixel_shader_instructions",
+                    "num_samplers",
+                    "num_vertex_texture_samples",
+                    "num_pixel_texture_samples",
+                    "num_virtual_texture_samples",
+                    "num_uv_scalars",
+                    "num_interpolator_scalars",
+                ]
+                sa = mel.get_statistics(mat_a)
+                sb = mel.get_statistics(mat_b)
+                for field in stat_fields:
+                    va = int(getattr(sa, field))
+                    vb = int(getattr(sb, field))
+                    stats_diff[field] = {"a": va, "b": vb, "delta": vb - va}
+            except Exception:
+                pass
+
+            # Expression count by class
+            try:
+                exprs_a_data = json.loads(scan_all_expressions(path_a))
+                exprs_b_data = json.loads(scan_all_expressions(path_b))
+
+                counts_a = {}
+                counts_b = {}
+                if exprs_a_data.get("success"):
+                    for e in exprs_a_data.get("expressions", []):
+                        cls = e.get("class", "Unknown")
+                        counts_a[cls] = counts_a.get(cls, 0) + 1
+                if exprs_b_data.get("success"):
+                    for e in exprs_b_data.get("expressions", []):
+                        cls = e.get("class", "Unknown")
+                        counts_b[cls] = counts_b.get(cls, 0) + 1
+
+                all_classes = sorted(set(counts_a.keys()) | set(counts_b.keys()))
+                for cls in all_classes:
+                    ca = counts_a.get(cls, 0)
+                    cb = counts_b.get(cls, 0)
+                    if ca != cb:
+                        expression_diff[cls] = {"a": ca, "b": cb, "delta": cb - ca}
+            except Exception:
+                pass
+
+        return json.dumps({
+            "success": True,
+            "path_a": path_a,
+            "path_b": path_b,
+            "parameter_diff": parameter_diff,
+            "property_diff": property_diff,
+            "stats_diff": stats_diff,
+            "expression_diff": expression_diff,
+        })
+    except Exception as exc:
+        return _error_json(exc)
