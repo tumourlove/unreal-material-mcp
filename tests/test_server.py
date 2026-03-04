@@ -1235,3 +1235,39 @@ class TestRenameParameterCascade:
         assert "Param1" in result
         assert "Roughness" in result
         assert "3" in result
+
+
+class TestCreateMaterialInstance:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_created(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "instance_path": "/Game/Materials/MI_Red",
+            "parent_path": "/Game/Materials/M_Base",
+        })
+        result = server.create_material_instance(
+            "/Game/Materials/M_Base", "MI_Red"
+        )
+
+        assert "Created" in result
+        assert "MI_Red" in result
+        assert "/Game/Materials/M_Base" in result
+
+
+class TestReparentMaterialInstance:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_reparented(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "instance_path": "/Game/MI_Foo",
+            "old_parent": "/Game/M_Old",
+            "new_parent": "/Game/M_New",
+        })
+        result = server.reparent_material_instance(
+            "/Game/MI_Foo", "/Game/M_New"
+        )
+
+        assert "Reparented" in result or "reparent" in result.lower()
+        assert "/Game/M_New" in result

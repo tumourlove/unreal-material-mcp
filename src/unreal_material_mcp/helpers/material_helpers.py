@@ -2865,3 +2865,73 @@ def rename_parameter_cascade(asset_path, old_name, new_name, base_path="/Game"):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W12. create_instance
+# ---------------------------------------------------------------------------
+
+def create_instance(parent_path, instance_name, destination_path=""):
+    """Create a new MaterialInstanceConstant from a parent material."""
+    try:
+        parent = _load_material(parent_path)
+
+        if not destination_path:
+            pkg, _ = _asset_parts(parent_path)
+            destination_path = pkg
+
+        at = unreal.AssetToolsHelpers.get_asset_tools()
+        factory = unreal.MaterialInstanceConstantFactoryNew()
+
+        new_asset = at.create_asset(
+            instance_name, destination_path,
+            unreal.MaterialInstanceConstant, factory
+        )
+        if new_asset is None:
+            return _error_json(f"Failed to create MI: {instance_name}")
+
+        _mel().set_material_instance_parent(new_asset, parent)
+
+        instance_path = f"{destination_path}/{instance_name}"
+
+        return json.dumps({
+            "success": True,
+            "instance_path": instance_path,
+            "parent_path": parent_path,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W13. reparent_instance
+# ---------------------------------------------------------------------------
+
+def reparent_instance(instance_path, new_parent_path):
+    """Reparent a MaterialInstanceConstant to a different parent."""
+    try:
+        mi = _load_material(instance_path)
+        if not _is_material_instance(mi):
+            return _error_json(f"Not a MaterialInstanceConstant: {instance_path}")
+
+        new_parent = _load_material(new_parent_path)
+        mel = _mel()
+
+        # Get old parent
+        try:
+            old_parent = mi.get_editor_property("parent")
+            old_parent_path = old_parent.get_path_name() if old_parent else None
+        except Exception:
+            old_parent_path = None
+
+        mel.set_material_instance_parent(mi, new_parent)
+        mel.update_material_instance(mi)
+
+        return json.dumps({
+            "success": True,
+            "instance_path": instance_path,
+            "old_parent": old_parent_path,
+            "new_parent": new_parent_path,
+        })
+    except Exception as exc:
+        return _error_json(exc)

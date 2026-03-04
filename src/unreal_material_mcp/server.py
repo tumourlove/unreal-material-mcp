@@ -1503,6 +1503,71 @@ def rename_parameter_cascade(
     return "\n".join(lines)
 
 
+@mcp.tool()
+def create_material_instance(
+    parent_path: str,
+    instance_name: str,
+    destination_path: str = "",
+) -> str:
+    """Create a new material instance from a parent material.
+
+    Args:
+        parent_path: Parent material or MI path
+        instance_name: Name for the new MI
+        destination_path: Content path (default: same dir as parent)
+    """
+    dest_arg = f"'{_escape_py_string(destination_path)}'" if destination_path else "''"
+    script = (
+        f"result = material_helpers.create_instance("
+        f"'{_escape_py_string(parent_path)}', "
+        f"'{_escape_py_string(instance_name)}', "
+        f"destination_path={dest_arg})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Created: {data.get('instance_path', instance_name)}",
+        f"  Parent: {data.get('parent_path', parent_path)}",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def reparent_material_instance(
+    instance_path: str,
+    new_parent_path: str,
+) -> str:
+    """Reparent a material instance to a different parent material.
+
+    Args:
+        instance_path: MI to reparent
+        new_parent_path: New parent material or MI
+    """
+    script = (
+        f"result = material_helpers.reparent_instance("
+        f"'{_escape_py_string(instance_path)}', "
+        f"'{_escape_py_string(new_parent_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Reparented: {data.get('instance_path', instance_path)}",
+        f"  Old parent: {data.get('old_parent', 'N/A')}",
+        f"  New parent: {data.get('new_parent', new_parent_path)}",
+    ]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
