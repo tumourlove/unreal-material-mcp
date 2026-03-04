@@ -918,6 +918,10 @@ def delete_material_expression(asset_path: str, expression_name: str) -> str:
         f"Deleted: {data.get('expression_name', expression_name)}",
         f"  Material: {data.get('asset_path', asset_path)}",
     ]
+    if data.get("disconnected"):
+        lines.append(f"  Warning: {data['warning']}")
+        for entry in data["disconnected"]:
+            lines.append(f"    - {entry['expression']} input {entry['input']}")
     return "\n".join(lines)
 
 
@@ -965,6 +969,8 @@ def connect_material_expressions(
         f"  Type: {conn_type}",
         f"  Material: {data.get('asset_path', asset_path)}",
     ]
+    if data.get("warning"):
+        lines.append(f"  Warning: {data['warning']}")
     return "\n".join(lines)
 
 

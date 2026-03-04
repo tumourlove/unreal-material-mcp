@@ -1760,13 +1760,64 @@ def delete_expression(asset_path, expression_name):
         if expr is None:
             return _error_json(f"Expression not found: {obj_path}")
 
-        _mel().delete_material_expression(mat, expr)
+        mel = _mel()
 
-        return json.dumps({
+        # Scan for downstream expressions that reference this one as an input
+        disconnected = []
+        try:
+            target_count = int(mel.get_num_material_expressions(mat))
+        except Exception:
+            target_count = -1
+        try:
+            found_count = 0
+            MAX_INDEX = 200
+            for cls_name in KNOWN_EXPRESSION_CLASSES:
+                consecutive_misses = 0
+                for i in range(MAX_INDEX):
+                    other_path = f"{full_path}:MaterialExpression{cls_name}_{i}"
+                    other_expr = unreal.find_object(None, other_path)
+                    if other_expr is None:
+                        consecutive_misses += 1
+                        if consecutive_misses >= 30:
+                            break
+                        continue
+                    consecutive_misses = 0
+                    found_count += 1
+                    if other_expr == expr:
+                        if 0 < target_count <= found_count:
+                            break
+                        continue
+                    try:
+                        connected = mel.get_inputs_for_material_expression(mat, other_expr)
+                        input_names = mel.get_material_expression_input_names(other_expr)
+                        input_names = [str(n) for n in input_names]
+                        for idx, conn_expr in enumerate(connected):
+                            if conn_expr is not None and conn_expr == expr:
+                                pin_name = input_names[idx] if idx < len(input_names) else f"Input_{idx}"
+                                disconnected.append({
+                                    "expression": _expr_id(other_expr),
+                                    "input": pin_name,
+                                })
+                    except Exception:
+                        pass
+                    if 0 < target_count <= found_count:
+                        break
+                if 0 < target_count <= found_count:
+                    break
+        except Exception:
+            pass
+
+        mel.delete_material_expression(mat, expr)
+
+        result = {
             "success": True,
             "asset_path": asset_path,
             "deleted": expression_name,
-        })
+        }
+        if disconnected:
+            result["disconnected"] = disconnected
+            result["warning"] = f"Disconnected {len(disconnected)} input(s) on other expressions"
+        return json.dumps(result)
     except Exception as exc:
         return _error_json(exc)
 
@@ -1839,18 +1890,42 @@ def connect_expressions(asset_path, from_expression, to_expression_or_property,
             if to_expr is None:
                 return _error_json(f"Target expression not found: {to_name}")
 
+            # Check for existing connection on the target input
+            previous_connection = None
+            try:
+                connected = mel.get_inputs_for_material_expression(mat, to_expr)
+                input_names = mel.get_material_expression_input_names(to_expr)
+                input_names = [str(n) for n in input_names]
+                target_pin = to_input or (input_names[0] if input_names else "")
+                for idx, conn_expr in enumerate(connected):
+                    if conn_expr is None:
+                        continue
+                    pin_name = input_names[idx] if idx < len(input_names) else f"Input_{idx}"
+                    if pin_name == target_pin:
+                        previous_connection = _expr_id(conn_expr)
+                        break
+            except Exception:
+                pass
+
             ok = mel.connect_material_expressions(
                 from_expr, from_output, to_expr, to_input
             )
             conn_str = (
                 f"{from_name}[{from_output}] -> {to_name}[{to_input}]"
             )
-            return json.dumps({
+            result = {
                 "success": bool(ok),
                 "asset_path": asset_path,
                 "connection": conn_str,
                 "type": "expression",
-            })
+            }
+            if previous_connection:
+                result["previous_connection"] = previous_connection
+                result["warning"] = (
+                    f"Overwrote existing connection from {previous_connection}"
+                    f" on input {to_input or target_pin}"
+                )
+            return json.dumps(result)
     except Exception as exc:
         return _error_json(exc)
 

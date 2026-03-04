@@ -807,6 +807,26 @@ class TestDeleteMaterialExpression:
         assert "Error:" in result
         assert "not found" in result
 
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_disconnection_warning(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "expression_name": "MaterialExpressionConstant_0",
+            "deleted": "MaterialExpressionConstant_0",
+            "disconnected": [
+                {"expression": "MaterialExpressionIf_15", "input": "A"},
+                {"expression": "MaterialExpressionMultiply_3", "input": "B"},
+            ],
+            "warning": "Disconnected 2 input(s) on other expressions",
+        })
+        result = server.delete_material_expression("/Game/M_Foo", "MaterialExpressionConstant_0")
+
+        assert "Deleted:" in result
+        assert "Warning: Disconnected 2 input(s)" in result
+        assert "MaterialExpressionIf_15 input A" in result
+        assert "MaterialExpressionMultiply_3 input B" in result
+
 
 # ---------------------------------------------------------------------------
 # Tool 14: connect_material_expressions
@@ -849,6 +869,25 @@ class TestConnectMaterialExpressions:
         assert "Connected:" in result
         assert "Type: property" in result
         assert "BaseColor" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_overwrite_warning(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "connection_string": "Constant_32:[] -> If_15:[A]",
+            "connection_type": "expression",
+            "previous_connection": "MaterialExpressionRound_3",
+            "warning": "Overwrote existing connection from MaterialExpressionRound_3 on input A",
+        })
+        result = server.connect_material_expressions(
+            "/Game/M_Foo", "Constant_32", "If_15",
+            from_output="", to_input="A",
+        )
+
+        assert "Connected:" in result
+        assert "Warning: Overwrote existing connection" in result
+        assert "MaterialExpressionRound_3" in result
 
 
 # ---------------------------------------------------------------------------
