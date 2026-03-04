@@ -693,6 +693,21 @@ def trace_connections(asset_path, expression_name=None):
             except Exception:
                 continue
 
+        # If no individual pins connected, check MaterialAttributes pin.
+        # Materials using MaterialAttributes (e.g. via SetMaterialAttributes
+        # or MatLayerBlend) route everything through a single pin.
+        if not trees:
+            try:
+                ma_enum = getattr(unreal.MaterialProperty, "MP_MATERIAL_ATTRIBUTES", None)
+                if ma_enum is not None:
+                    ma_node = mel.get_material_property_input_node(mat, ma_enum)
+                    if ma_node is not None:
+                        tree = _trace_expression(mat, ma_node, mel)
+                        if tree is not None:
+                            trees["MaterialAttributes"] = tree
+            except Exception:
+                pass
+
         return json.dumps({
             "success": True,
             "asset_path": asset_path,
@@ -1042,7 +1057,11 @@ def get_dependencies(asset_path):
             pass
 
         # --- Parameter sources ---
+        # get_*_parameter_source resolves which asset defines each parameter.
+        # For base materials this is always the material itself ("local").
+        # For material instances it traces up the parent chain.
         parameter_sources = []
+        mat_path = mat.get_path_name()
         param_type_getters = {
             "Scalar": "get_scalar_parameter_source",
             "Vector": "get_vector_parameter_source",
@@ -1058,23 +1077,37 @@ def get_dependencies(asset_path):
         for ptype, source_getter_name in param_type_getters.items():
             try:
                 names = getattr(mel, param_name_getters[ptype])(mat)
-                source_fn = getattr(mel, source_getter_name)
+                source_fn = getattr(mel, source_getter_name, None)
                 for name in names:
                     name_str = str(name)
-                    try:
-                        found, source_path = source_fn(mat, name_str)
+                    if source_fn is not None:
+                        try:
+                            found, source_path = source_fn(mat, name_str)
+                            source_str = str(source_path) if found else None
+                            # If source is the material itself, label as local
+                            if source_str and mat_path in source_str:
+                                source_str = "local"
+                            parameter_sources.append({
+                                "name": name_str,
+                                "type": ptype,
+                                "found": bool(found),
+                                "source": source_str,
+                            })
+                        except Exception:
+                            # API may not be available in all UE versions
+                            parameter_sources.append({
+                                "name": name_str,
+                                "type": ptype,
+                                "found": True,
+                                "source": "local",
+                            })
+                    else:
+                        # Source getter not available — assume local for base mats
                         parameter_sources.append({
                             "name": name_str,
                             "type": ptype,
-                            "found": bool(found),
-                            "source": str(source_path) if found else None,
-                        })
-                    except Exception:
-                        parameter_sources.append({
-                            "name": name_str,
-                            "type": ptype,
-                            "found": False,
-                            "source": None,
+                            "found": True,
+                            "source": "local",
                         })
             except Exception:
                 pass
@@ -1762,12 +1795,21 @@ def delete_expression(asset_path, expression_name):
 
         mel = _mel()
 
-        # Scan for downstream expressions that reference this one as an input
+        # Scan for downstream expressions that reference this one as an input.
+        # Build a set of expressions that are actually in the material's list
+        # to avoid reporting stale references from previously deleted nodes
+        # that are still in memory but no longer part of the material.
         disconnected = []
         try:
             target_count = int(mel.get_num_material_expressions(mat))
         except Exception:
             target_count = -1
+
+        # Scan for downstream expressions that reference this one as an input.
+        # find_object may return stale references to expressions that were
+        # deleted from the material but not yet garbage collected, so we
+        # validate by only collecting up to target_count expressions and
+        # verifying each with get_inputs_for_material_expression.
         try:
             found_count = 0
             MAX_INDEX = 200
@@ -1782,13 +1824,19 @@ def delete_expression(asset_path, expression_name):
                             break
                         continue
                     consecutive_misses = 0
-                    found_count += 1
                     if other_expr == expr:
+                        found_count += 1
                         if 0 < target_count <= found_count:
                             break
                         continue
+                    # Verify expression is still in the material by trying
+                    # to query its inputs — this fails for stale references
                     try:
                         connected = mel.get_inputs_for_material_expression(mat, other_expr)
+                    except Exception:
+                        continue
+                    found_count += 1
+                    try:
                         input_names = mel.get_material_expression_input_names(other_expr)
                         input_names = [str(n) for n in input_names]
                         for idx, conn_expr in enumerate(connected):

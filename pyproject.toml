@@ -1,6 +1,6 @@
 [project]
 name = "unreal-material-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Material graph intelligence for Unreal Engine AI development via MCP"
 readme = "README.md"
 license = { text = "MIT" }

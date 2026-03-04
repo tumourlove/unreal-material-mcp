@@ -33,15 +33,19 @@ _bridge: EditorBridge | None = None
 _project_path: str = UE_PROJECT_PATH
 _helper_uploaded: bool = False
 _helper_hash: str = ""
+# Track recently deleted expression names per material to filter stale
+# disconnect warnings (UE keeps deleted objects alive until GC).
+_recently_deleted: dict[str, set[str]] = {}
 
 
 def _reset_state() -> None:
     """Reset module singletons (used by tests)."""
-    global _bridge, _helper_uploaded, _helper_hash, _project_path
+    global _bridge, _helper_uploaded, _helper_hash, _project_path, _recently_deleted
     _bridge = None
     _helper_uploaded = False
     _helper_hash = ""
     _project_path = UE_PROJECT_PATH
+    _recently_deleted = {}
 
 
 def _get_bridge() -> EditorBridge:
@@ -577,8 +581,14 @@ def get_material_dependencies(asset_path: str) -> str:
     sources = data.get("parameter_sources", [])
     lines.append(f"  Parameter Sources ({len(sources)}):")
     if sources:
-        for s in sources:
-            lines.append(f"    {s}")
+        # Group: show non-local sources explicitly, summarize local ones
+        non_local = [s for s in sources if isinstance(s, dict) and s.get("source") not in ("local", None)]
+        local_count = len(sources) - len(non_local)
+        if non_local:
+            for s in non_local:
+                lines.append(f"    {s.get('name', '?')} ({s.get('type', '?')}) -> {s.get('source', '?')}")
+        if local_count > 0:
+            lines.append(f"    ({local_count} parameter(s) defined locally)")
     else:
         lines.append("    (none)")
 
@@ -844,7 +854,7 @@ def create_material_expression(
     expression_class: str,
     node_pos_x: int = 0,
     node_pos_y: int = 0,
-    properties: str | None = None,
+    properties: str | dict | None = None,
 ) -> str:
     """Create a new expression node in a material graph.
 
@@ -856,10 +866,13 @@ def create_material_expression(
         properties: Optional JSON string of properties, e.g. '{"parameter_name": "Roughness"}'
     """
     if properties is not None:
-        try:
-            props_dict = json.loads(properties)
-        except (json.JSONDecodeError, TypeError):
-            return f"Error: Invalid JSON for properties: {properties}"
+        if isinstance(properties, dict):
+            props_dict = properties
+        else:
+            try:
+                props_dict = json.loads(properties)
+            except (json.JSONDecodeError, TypeError):
+                return f"Error: Invalid JSON for properties: {properties}"
         props_repr = repr(props_dict)
     else:
         props_repr = "None"
@@ -902,6 +915,8 @@ def delete_material_expression(asset_path: str, expression_name: str) -> str:
         asset_path: Unreal asset path to a material
         expression_name: Name of the expression to delete
     """
+    global _recently_deleted
+
     script = (
         f"result = material_helpers.delete_expression("
         f"'{_escape_py_string(asset_path)}', "
@@ -914,14 +929,27 @@ def delete_material_expression(asset_path: str, expression_name: str) -> str:
     if err:
         return f"Error: {err}"
 
+    # Track this deletion to filter stale warnings in subsequent deletes
+    deleted_name = data.get("expression_name", expression_name)
+    if not deleted_name.startswith("MaterialExpression"):
+        deleted_name = f"MaterialExpression{deleted_name}"
+    deleted_set = _recently_deleted.setdefault(asset_path, set())
+    deleted_set.add(deleted_name)
+
     lines = [
         f"Deleted: {data.get('expression_name', expression_name)}",
         f"  Material: {data.get('asset_path', asset_path)}",
     ]
     if data.get("disconnected"):
-        lines.append(f"  Warning: {data['warning']}")
-        for entry in data["disconnected"]:
-            lines.append(f"    - {entry['expression']} input {entry['input']}")
+        # Filter out warnings about expressions we've already deleted
+        live_disconnected = [
+            entry for entry in data["disconnected"]
+            if entry["expression"] not in deleted_set
+        ]
+        if live_disconnected:
+            lines.append(f"  Warning: Disconnected {len(live_disconnected)} input(s) on other expressions")
+            for entry in live_disconnected:
+                lines.append(f"    - {entry['expression']} input {entry['input']}")
     return "\n".join(lines)
 
 
