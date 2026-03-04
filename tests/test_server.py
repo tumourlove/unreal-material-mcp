@@ -1062,3 +1062,46 @@ class TestFindMaterialFunctionUsage:
         assert "MF_NormalBlend" in result
         assert "MF_PackNormal" in result
         assert "MF_TextureUtility" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 21: search_material_instances
+# ---------------------------------------------------------------------------
+
+class TestSearchMaterialInstances:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_dead_instances(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "base_path": "/Game",
+            "filter_type": "dead",
+            "results": [
+                {"path": "/Game/MI_Old", "parent": "/Game/M_Base", "override_count": 0},
+            ],
+            "total_scanned": 20,
+        })
+        result = server.search_material_instances(filter_type="dead")
+
+        assert "dead" in result.lower() or "Dead" in result
+        assert "/Game/MI_Old" in result
+        assert "0 overrides" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_by_parent(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "base_path": "/Game",
+            "filter_type": "by_parent",
+            "results": [
+                {"path": "/Game/MI_A", "parent": "/Game/M_Base", "override_count": 3},
+                {"path": "/Game/MI_B", "parent": "/Game/M_Base", "override_count": 1},
+            ],
+            "total_scanned": 20,
+        })
+        result = server.search_material_instances(
+            parent_path="/Game/M_Base", filter_type="by_parent"
+        )
+
+        assert "/Game/MI_A" in result
+        assert "/Game/MI_B" in result

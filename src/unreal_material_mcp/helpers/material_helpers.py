@@ -2321,3 +2321,100 @@ def _trace_function_chain(function_path, visited=None, depth=0, max_depth=10):
         pass
 
     return node
+
+
+# ---------------------------------------------------------------------------
+# R4. search_material_instances
+# ---------------------------------------------------------------------------
+
+def search_instances(base_path="/Game", parent_path=None, filter_type="all"):
+    """Search for material instances with various filters.
+
+    Parameters
+    ----------
+    base_path : str
+        Content path to search under.
+    parent_path : str or None
+        Filter by parent material/MI path (for "by_parent" filter).
+    filter_type : str
+        One of: "all", "by_parent", "dead" (0 overrides), "orphaned" (missing parent).
+
+    Returns
+    -------
+    str
+        JSON with results list.
+    """
+    try:
+        ar = unreal.AssetRegistryHelpers.get_asset_registry()
+        mel = _mel()
+        all_assets = ar.get_assets_by_path(base_path, recursive=True)
+
+        results = []
+        total_scanned = 0
+
+        for asset_data in all_assets:
+            try:
+                class_name = str(asset_data.asset_class_path.asset_name)
+            except Exception:
+                continue
+            if class_name != "MaterialInstanceConstant":
+                continue
+
+            total_scanned += 1
+            mi_path = str(asset_data.package_name)
+
+            try:
+                mi = _eal().load_asset(mi_path)
+                if mi is None:
+                    continue
+            except Exception:
+                continue
+
+            # Get parent
+            try:
+                parent = mi.get_editor_property("parent")
+                parent_path_str = parent.get_path_name() if parent else None
+            except Exception:
+                parent_path_str = None
+
+            # Count overrides
+            override_count = 0
+            for getter in (mel.get_scalar_parameter_names,
+                           mel.get_vector_parameter_names,
+                           mel.get_texture_parameter_names,
+                           mel.get_static_switch_parameter_names):
+                try:
+                    override_count += len(list(getter(mi)))
+                except Exception:
+                    pass
+
+            entry = {
+                "path": mi_path,
+                "name": str(asset_data.asset_name),
+                "parent": parent_path_str,
+                "override_count": override_count,
+            }
+
+            if filter_type == "all":
+                results.append(entry)
+            elif filter_type == "by_parent":
+                if parent_path and parent_path_str and parent_path in parent_path_str:
+                    results.append(entry)
+            elif filter_type == "dead":
+                if override_count == 0:
+                    results.append(entry)
+            elif filter_type == "orphaned":
+                if parent_path_str is None:
+                    results.append(entry)
+            else:
+                results.append(entry)
+
+        return json.dumps({
+            "success": True,
+            "base_path": base_path,
+            "filter_type": filter_type,
+            "results": results,
+            "total_scanned": total_scanned,
+        })
+    except Exception as exc:
+        return _error_json(exc)

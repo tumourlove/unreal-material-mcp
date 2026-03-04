@@ -1250,6 +1250,57 @@ def find_material_function_usage(
 
 
 # ---------------------------------------------------------------------------
+# Tool 21: search_material_instances
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def search_material_instances(
+    base_path: str = "/Game",
+    parent_path: str | None = None,
+    filter_type: str = "all",
+) -> str:
+    """Search for material instances with filters: by parent, dead (no overrides), orphaned.
+
+    Args:
+        base_path: Content path to search under
+        parent_path: Filter by parent (for 'by_parent' filter)
+        filter_type: One of 'all', 'by_parent', 'dead', 'orphaned'
+    """
+    parent_arg = f"'{_escape_py_string(parent_path)}'" if parent_path else "None"
+    script = (
+        f"result = material_helpers.search_instances("
+        f"base_path='{_escape_py_string(base_path)}', "
+        f"parent_path={parent_arg}, "
+        f"filter_type='{_escape_py_string(filter_type)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    results = data.get("results", [])
+    scanned = data.get("total_scanned", 0)
+    ft = data.get("filter_type", filter_type)
+
+    lines = [
+        f"Material instances [{ft}] under {data.get('base_path', base_path)} "
+        f"({len(results)} found, {scanned} scanned):",
+    ]
+
+    if not results:
+        lines.append("  No instances found.")
+    else:
+        for r in results:
+            parent = r.get("parent", "?")
+            overrides = r.get("override_count", 0)
+            lines.append(f"  {r.get('path', '?')} (parent: {parent}, {overrides} overrides)")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
