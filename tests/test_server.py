@@ -1209,3 +1209,29 @@ class TestManageMaterialParameter:
 
         assert "Renamed" in result or "renamed" in result
         assert "Roughness" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 25: rename_parameter_cascade
+# ---------------------------------------------------------------------------
+
+class TestRenameParameterCascade:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_cascade_rename(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Base",
+            "old_name": "Param1",
+            "new_name": "Roughness",
+            "material_renamed": True,
+            "instances_updated": 3,
+            "instances_scanned": 10,
+        })
+        result = server.rename_parameter_cascade(
+            "/Game/M_Base", "Param1", "Roughness"
+        )
+
+        assert "Param1" in result
+        assert "Roughness" in result
+        assert "3" in result

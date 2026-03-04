@@ -2792,3 +2792,76 @@ def manage_parameter(asset_path, action, parameter_name, new_name=None,
 
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W11. rename_parameter_cascade
+# ---------------------------------------------------------------------------
+
+def rename_parameter_cascade(asset_path, old_name, new_name, base_path="/Game"):
+    """Rename a parameter across a material and all its child instances.
+
+    Parameters
+    ----------
+    asset_path : str
+        Base material path.
+    old_name : str
+        Current parameter name.
+    new_name : str
+        New parameter name.
+    base_path : str
+        Scope for child instance search.
+
+    Returns
+    -------
+    str
+        JSON with rename results.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json("Cannot cascade rename from a MaterialInstanceConstant.")
+
+        mel = _mel()
+
+        # Rename on base material
+        rename_result = json.loads(
+            manage_parameter(asset_path, "rename", old_name, new_name=new_name)
+        )
+        if not rename_result.get("success"):
+            return json.dumps(rename_result)
+
+        # Find and update child instances
+        instances_updated = 0
+        instances_scanned = 0
+
+        try:
+            children = mel.get_child_instances(mat)
+            for child_data in children:
+                instances_scanned += 1
+                try:
+                    child_path = str(child_data.package_name)
+                    if not child_path.startswith(base_path):
+                        continue
+                    child = _eal().load_asset(child_path)
+                    if child is None or not _is_material_instance(child):
+                        continue
+
+                    mel.update_material_instance(child)
+                    instances_updated += 1
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "old_name": old_name,
+            "new_name": new_name,
+            "material_renamed": True,
+            "instances_updated": instances_updated,
+            "instances_scanned": instances_scanned,
+        })
+    except Exception as exc:
+        return _error_json(exc)

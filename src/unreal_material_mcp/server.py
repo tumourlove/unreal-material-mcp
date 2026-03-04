@@ -1474,6 +1474,35 @@ def manage_material_parameter(
     return "\n".join(lines)
 
 
+@mcp.tool()
+def rename_parameter_cascade(
+    asset_path: str,
+    old_name: str,
+    new_name: str,
+    base_path: str = "/Game",
+) -> str:
+    """Rename a parameter across a material and all its child instances."""
+    script = (
+        f"result = material_helpers.rename_parameter_cascade("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(old_name)}', "
+        f"'{_escape_py_string(new_name)}', "
+        f"base_path='{_escape_py_string(base_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Renamed: {data.get('old_name', old_name)} → {data.get('new_name', new_name)}",
+        f"  Material: {data.get('asset_path', asset_path)}",
+        f"  Instances updated: {data.get('instances_updated', 0)} / {data.get('instances_scanned', 0)} scanned",
+    ]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
