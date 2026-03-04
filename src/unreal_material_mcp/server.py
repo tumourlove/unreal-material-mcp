@@ -989,7 +989,7 @@ def set_material_property(asset_path: str, property_name: str, value: str) -> st
     value_repr = repr(parsed_value)
 
     script = (
-        f"result = material_helpers.set_material_property("
+        f"result = material_helpers.set_property("
         f"'{_escape_py_string(asset_path)}', "
         f"'{_escape_py_string(property_name)}', "
         f"{value_repr})\n"
@@ -1029,7 +1029,7 @@ def recompile_material(asset_path: str) -> str:
         asset_path: Unreal asset path to a material
     """
     script = (
-        f"result = material_helpers.recompile_material("
+        f"result = material_helpers.recompile("
         f"'{_escape_py_string(asset_path)}')\n"
         "print(result)\n"
     )
@@ -1054,7 +1054,7 @@ def layout_material_graph(asset_path: str) -> str:
         asset_path: Unreal asset path to a material
     """
     script = (
-        f"result = material_helpers.layout_material_graph("
+        f"result = material_helpers.layout_graph("
         f"'{_escape_py_string(asset_path)}')\n"
         "print(result)\n"
     )
