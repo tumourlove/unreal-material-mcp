@@ -1301,6 +1301,56 @@ def search_material_instances(
 
 
 # ---------------------------------------------------------------------------
+# Tool 22: set_expression_property
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def set_expression_property(
+    asset_path: str,
+    expression_name: str,
+    property_name: str,
+    value: str,
+) -> str:
+    """Set a property on an existing material expression node.
+
+    Args:
+        asset_path: Base material path
+        expression_name: Expression to modify (e.g. 'MaterialExpressionScalarParameter_0')
+        property_name: Property to set (e.g. 'parameter_name', 'texture', 'code')
+        value: New value as string (JSON for complex types)
+    """
+    try:
+        parsed_value = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        parsed_value = value
+
+    value_repr = repr(parsed_value)
+
+    script = (
+        f"result = material_helpers.set_expression_property("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(expression_name)}', "
+        f"'{_escape_py_string(property_name)}', "
+        f"{value_repr})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Expression: {data.get('expression_name', expression_name)}",
+        f"  Property: {data.get('property_name', property_name)}",
+        f"  Old: {data.get('old_value', 'N/A')}",
+        f"  New: {data.get('new_value', 'N/A')}",
+        f"  Material: {data.get('asset_path', asset_path)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -2418,3 +2418,84 @@ def search_instances(base_path="/Game", parent_path=None, filter_type="all"):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W8. set_expression_property
+# ---------------------------------------------------------------------------
+
+def set_expression_property(asset_path, expression_name, property_name, value):
+    """Set a property on an existing material expression.
+
+    Parameters
+    ----------
+    asset_path : str
+        Base material asset path.
+    expression_name : str
+        Expression object name.
+    property_name : str
+        Property to set (e.g. "parameter_name", "texture", "code").
+    value
+        New value. Type depends on property.
+
+    Returns
+    -------
+    str
+        JSON with old and new values.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json("Cannot edit expressions on a MaterialInstanceConstant.")
+
+        full_path = _full_object_path(asset_path)
+        if not expression_name.startswith("MaterialExpression"):
+            expression_name = f"MaterialExpression{expression_name}"
+
+        obj_path = f"{full_path}:{expression_name}"
+        expr = unreal.find_object(None, obj_path)
+        if expr is None:
+            return _error_json(f"Expression not found: {expression_name}")
+
+        # Read old value
+        try:
+            old_val = expr.get_editor_property(property_name)
+            if hasattr(old_val, 'get_path_name'):
+                old_repr = old_val.get_path_name()
+            elif hasattr(old_val, 'r'):
+                old_repr = {"r": old_val.r, "g": old_val.g, "b": old_val.b, "a": old_val.a}
+            else:
+                old_repr = str(old_val)
+        except Exception:
+            old_repr = None
+
+        # Handle special property types
+        if property_name == "texture":
+            tex = _eal().load_asset(str(value))
+            if tex is None:
+                return _error_json(f"Texture not found: {value}")
+            expr.set_editor_property(property_name, tex)
+            new_repr = str(value)
+        elif property_name == "constant" and isinstance(value, dict):
+            lc = unreal.LinearColor(
+                r=float(value.get("r", 0)),
+                g=float(value.get("g", 0)),
+                b=float(value.get("b", 0)),
+                a=float(value.get("a", 1)),
+            )
+            expr.set_editor_property(property_name, lc)
+            new_repr = value
+        else:
+            expr.set_editor_property(property_name, value)
+            new_repr = str(value)
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "expression_name": expression_name,
+            "property_name": property_name,
+            "old_value": old_repr,
+            "new_value": new_repr,
+        })
+    except Exception as exc:
+        return _error_json(exc)

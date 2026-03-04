@@ -1105,3 +1105,41 @@ class TestSearchMaterialInstances:
 
         assert "/Game/MI_A" in result
         assert "/Game/MI_B" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 22: set_expression_property
+# ---------------------------------------------------------------------------
+
+class TestSetExpressionProperty:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_property_set(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "expression_name": "MaterialExpressionScalarParameter_0",
+            "property_name": "parameter_name",
+            "old_value": "Param",
+            "new_value": "Roughness",
+        })
+        result = server.set_expression_property(
+            "/Game/M_Foo", "MaterialExpressionScalarParameter_0",
+            "parameter_name", "Roughness"
+        )
+
+        assert "parameter_name" in result
+        assert "Roughness" in result
+        assert "Param" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_error_expression_not_found(self, _src):
+        _setup_tool_mock({
+            "success": False,
+            "error": "Expression not found: Missing_0",
+        })
+        result = server.set_expression_property(
+            "/Game/M_Foo", "Missing_0", "parameter_name", "Test"
+        )
+
+        assert "Error:" in result
