@@ -1351,6 +1351,51 @@ def set_expression_property(
 
 
 # ---------------------------------------------------------------------------
+# Tool 23: duplicate_expression_subgraph
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def duplicate_expression_subgraph(
+    asset_path: str,
+    root_expression: str,
+    offset_x: int = 0,
+    offset_y: int = 300,
+) -> str:
+    """Duplicate an expression and all its upstream inputs within the same material.
+
+    Args:
+        asset_path: Base material path
+        root_expression: Root expression to duplicate
+        offset_x: X offset for duplicated nodes
+        offset_y: Y offset for duplicated nodes
+    """
+    script = (
+        f"result = material_helpers.duplicate_subgraph("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(root_expression)}', "
+        f"offset_x={offset_x}, offset_y={offset_y})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    duped = data.get("duplicated", {})
+    count = data.get("count", len(duped))
+
+    lines = [
+        f"Duplicated subgraph from {data.get('root_expression', root_expression)} ({count} nodes):",
+        f"  Material: {data.get('asset_path', asset_path)}",
+    ]
+    for orig, new in duped.items():
+        lines.append(f"  {orig} → {new}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

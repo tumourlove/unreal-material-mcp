@@ -2499,3 +2499,116 @@ def set_expression_property(asset_path, expression_name, property_name, value):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W9. duplicate_subgraph
+# ---------------------------------------------------------------------------
+
+def duplicate_subgraph(asset_path, root_expression, offset_x=0, offset_y=300):
+    """Duplicate an expression and all its upstream inputs within the same material.
+
+    Parameters
+    ----------
+    asset_path : str
+        Base material path.
+    root_expression : str
+        Expression to duplicate (root of subgraph).
+    offset_x, offset_y : int
+        Position offset for duplicated nodes.
+
+    Returns
+    -------
+    str
+        JSON with mapping of original to duplicate names.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json("Cannot duplicate on a MaterialInstanceConstant.")
+
+        mel = _mel()
+        full_path = _full_object_path(asset_path)
+
+        if not root_expression.startswith("MaterialExpression"):
+            root_expression = f"MaterialExpression{root_expression}"
+
+        root_obj = unreal.find_object(None, f"{full_path}:{root_expression}")
+        if root_obj is None:
+            return _error_json(f"Expression not found: {root_expression}")
+
+        # Collect subgraph via BFS
+        to_visit = [root_obj]
+        visited = set()
+        expressions_to_dup = []
+
+        while to_visit:
+            expr = to_visit.pop(0)
+            eid = _expr_id(expr)
+            if eid in visited:
+                continue
+            visited.add(eid)
+            expressions_to_dup.append(expr)
+
+            try:
+                inputs = mel.get_inputs_for_material_expression(mat, expr)
+                for inp in inputs:
+                    if inp is not None:
+                        to_visit.append(inp)
+            except Exception:
+                pass
+
+        # Duplicate each expression
+        name_map = {}
+        for expr in expressions_to_dup:
+            dup = mel.duplicate_material_expression(mat, None, expr)
+            if dup is not None:
+                try:
+                    pos = _expr_position(expr)
+                    dup.set_editor_property(
+                        "material_expression_editor_x", pos["x"] + offset_x
+                    )
+                    dup.set_editor_property(
+                        "material_expression_editor_y", pos["y"] + offset_y
+                    )
+                except Exception:
+                    pass
+                name_map[_expr_id(expr)] = _expr_id(dup)
+
+        # Reconnect duplicated nodes
+        for expr in expressions_to_dup:
+            orig_name = _expr_id(expr)
+            dup_name = name_map.get(orig_name)
+            if not dup_name:
+                continue
+
+            dup_expr = unreal.find_object(None, f"{full_path}:{dup_name}")
+            if dup_expr is None:
+                continue
+
+            try:
+                inputs = mel.get_inputs_for_material_expression(mat, expr)
+                input_names = mel.get_material_expression_input_names(expr)
+                for idx, inp_expr in enumerate(inputs):
+                    if inp_expr is None:
+                        continue
+                    inp_name = _expr_id(inp_expr)
+                    dup_inp_name = name_map.get(inp_name)
+                    if dup_inp_name:
+                        dup_inp = unreal.find_object(None, f"{full_path}:{dup_inp_name}")
+                        if dup_inp:
+                            in_pin = str(input_names[idx]) if idx < len(input_names) else ""
+                            out_name = ""
+                            mel.connect_material_expressions(dup_inp, out_name, dup_expr, in_pin)
+            except Exception:
+                pass
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "root_expression": root_expression,
+            "duplicated": name_map,
+            "count": len(name_map),
+        })
+    except Exception as exc:
+        return _error_json(exc)

@@ -1143,3 +1143,29 @@ class TestSetExpressionProperty:
         )
 
         assert "Error:" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 23: duplicate_expression_subgraph
+# ---------------------------------------------------------------------------
+
+class TestDuplicateExpressionSubgraph:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_duplication(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "root_expression": "MaterialExpressionMultiply_0",
+            "duplicated": {
+                "MaterialExpressionMultiply_0": "MaterialExpressionMultiply_5",
+                "MaterialExpressionScalarParameter_0": "MaterialExpressionScalarParameter_3",
+            },
+            "count": 2,
+        })
+        result = server.duplicate_expression_subgraph(
+            "/Game/M_Foo", "MaterialExpressionMultiply_0"
+        )
+
+        assert "2" in result
+        assert "MaterialExpressionMultiply_5" in result
