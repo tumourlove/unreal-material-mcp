@@ -32,12 +32,12 @@ An MCP server that inspects and edits UE material graphs via the editor Python b
     │       ├── __init__.py              # Version
     │       ├── __main__.py              # CLI entry point
     │       ├── config.py                # UE_PROJECT_PATH, port config
-    │       ├── server.py                # FastMCP + 17 tool definitions
+    │       ├── server.py                # FastMCP + 28 tool definitions
     │       ├── editor_bridge.py         # UE remote execution protocol client
     │       └── helpers/
     │           └── material_helpers.py  # Uploaded to editor, runs in-process
     └── tests/
-        └── test_server.py              # 37 tests (mocked bridge)
+        └── test_server.py              # 58 tests (mocked bridge)
 
 ## Build & Run
 
@@ -73,35 +73,47 @@ uv run python -m unreal_material_mcp       # Run MCP server
 | `UE_MULTICAST_PORT` | UDP multicast port (default: 6766) |
 | `UE_MULTICAST_BIND` | Multicast bind address (default: 127.0.0.1) |
 
-## MCP Tools (17)
+## MCP Tools (28)
 
 ### Read-Only Inspection (5)
 
 | Tool | Purpose |
 |------|---------|
 | `get_material_info` | Material attributes: blend mode, shading model, domain, usage flags, expression count |
-| `get_material_parameters` | All parameters (scalar, vector, texture, static switch) with defaults |
+| `get_material_parameters` | All parameters (scalar, vector, texture, static switch) with defaults + static switch values/controls |
 | `get_material_expressions` | All expressions with types, names, positions, key properties. Optional class filter |
 | `trace_material_connections` | Connection graph from a specific node or from material output pins |
 | `search_materials` | Find materials by name, parameter name, expression type, or shading model |
 
-### Read-Only Analysis (5)
+### Read-Only Analysis (8)
 
 | Tool | Purpose |
 |------|---------|
-| `get_material_stats` | Shader instruction counts, sampler usage, texture samples + diagnostic warnings |
-| `get_material_dependencies` | Textures used, material functions referenced, parameter source tracing |
+| `get_material_stats` | Shader instruction counts, sampler usage, texture samples + compile status/errors + diagnostic warnings |
+| `get_material_dependencies` | Textures used (with sizes/formats), material functions referenced, parameter source tracing |
 | `inspect_material_function` | Scan expressions inside a material function (from a material's function call or direct path) |
 | `get_material_instance_chain` | Walk parent chain from instance to root material, show overrides, list children |
 | `compare_materials` | Diff two materials: parameters, properties, stats, expression counts |
+| `find_material_references` | Reverse lookup: find all assets referencing a material |
+| `find_breaking_changes` | Detect parameter removals/renames that would break child instances |
+| `find_material_function_usage` | Find all materials using a specific material function, with call chains |
 
-### Instance Editing (1)
+### Search (2)
+
+| Tool | Purpose |
+|------|---------|
+| `search_material_instances` | Search/filter material instances by parent, dead references, parameter overrides |
+| `batch_update_materials` | Batch update materials: swap textures, set parameters, or set attributes |
+
+### Instance Editing (3)
 
 | Tool | Purpose |
 |------|---------|
 | `set_material_instance_parameter` | Set scalar/vector/texture/static switch overrides on a MaterialInstanceConstant |
+| `create_material_instance` | Create a new MaterialInstanceConstant from a parent material |
+| `reparent_material_instance` | Reparent a MaterialInstanceConstant to a different parent |
 
-### Graph Editing (6)
+### Graph Editing (10)
 
 | Tool | Purpose |
 |------|---------|
@@ -109,8 +121,12 @@ uv run python -m unreal_material_mcp       # Run MCP server
 | `delete_material_expression` | Delete an expression node (auto-disconnects) |
 | `connect_material_expressions` | Connect two expressions or connect an expression to a material output pin |
 | `set_material_property` | Set blend mode, shading model, two-sided, domain, or usage flags |
+| `set_expression_property` | Set any editor property on an existing expression node |
 | `recompile_material` | Recompile a material after graph changes |
 | `layout_material_graph` | Auto-layout all expression nodes in a grid pattern |
+| `duplicate_expression_subgraph` | Deep-copy an expression and its upstream chain into same or different material |
+| `manage_material_parameter` | Add, remove, or rename parameter expressions |
+| `rename_parameter_cascade` | Rename a parameter across a material and all its child instances |
 
 ## Architecture Notes
 
