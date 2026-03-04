@@ -2041,7 +2041,12 @@ def find_references(asset_path, base_path="/Game", asset_types=None):
         ar = unreal.AssetRegistryHelpers.get_asset_registry()
 
         package_name = unreal.Name(asset_path)
-        referencers = ar.get_referencers(package_name)
+        ref_options = unreal.AssetRegistryDependencyOptions()
+        ref_options.include_soft_package_references = True
+        ref_options.include_hard_package_references = True
+        ref_options.include_searchable_names = False
+        ref_options.include_soft_management_references = False
+        referencers = ar.get_referencers(package_name, ref_options)
 
         type_filter = None
         if asset_types:

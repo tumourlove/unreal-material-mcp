@@ -755,11 +755,16 @@ def compare_materials(asset_path_a: str, asset_path_b: str) -> str:
     else:
         lines.append("  Parameters: identical")
 
-    prop_diff = data.get("property_diff", {})
+    prop_diff = data.get("property_diff", [])
     if prop_diff:
         lines.append("  Property Differences:")
-        for key, vals in prop_diff.items():
-            lines.append(f"    {key}: {vals.get('a', 'N/A')} -> {vals.get('b', 'N/A')}")
+        if isinstance(prop_diff, list):
+            for entry in prop_diff:
+                key = entry.get("property", "?")
+                lines.append(f"    {key}: {entry.get('a', 'N/A')} -> {entry.get('b', 'N/A')}")
+        else:
+            for key, vals in prop_diff.items():
+                lines.append(f"    {key}: {vals.get('a', 'N/A')} -> {vals.get('b', 'N/A')}")
 
     stats_diff = data.get("stats_diff", {})
     if stats_diff:
