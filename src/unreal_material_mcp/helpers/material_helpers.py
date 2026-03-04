@@ -2935,3 +2935,120 @@ def reparent_instance(instance_path, new_parent_path):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W14. batch_update
+# ---------------------------------------------------------------------------
+
+def batch_update(base_path, operation, filter_query="", filter_type="name",
+                 operation_args=None):
+    """Batch update materials: swap textures, set parameters, or set attributes."""
+    try:
+        if operation_args is None:
+            operation_args = {}
+
+        # Find target materials
+        search_result = json.loads(
+            search_materials_in_path(base_path, query=filter_query, filter_type=filter_type)
+        )
+        if not search_result.get("success"):
+            return json.dumps(search_result)
+
+        targets = search_result.get("results", [])
+        mel = _mel()
+        modified_assets = []
+        errors = []
+
+        for target in targets:
+            target_path = target.get("asset_path")
+            target_class = target.get("class", "Material")
+            try:
+                mat = _eal().load_asset(target_path)
+                if mat is None:
+                    continue
+
+                if operation == "swap_texture":
+                    old_tex = operation_args.get("old_texture", "")
+                    new_tex_path = operation_args.get("new_texture", "")
+                    if not old_tex or not new_tex_path:
+                        continue
+
+                    if target_class != "Material":
+                        continue
+
+                    full_path = _full_object_path(target_path)
+                    swapped = False
+                    tex_classes = ["TextureSample", "TextureSampleParameter2D",
+                                   "TextureObjectParameter"]
+                    for cls in tex_classes:
+                        for i in range(200):
+                            obj_path = f"{full_path}:MaterialExpression{cls}_{i}"
+                            expr = unreal.find_object(None, obj_path)
+                            if expr is None:
+                                if i > 30:
+                                    break
+                                continue
+                            try:
+                                tex = expr.get_editor_property("texture")
+                                if tex and old_tex in tex.get_path_name():
+                                    new_tex = _eal().load_asset(new_tex_path)
+                                    if new_tex:
+                                        expr.set_editor_property("texture", new_tex)
+                                        swapped = True
+                            except Exception:
+                                continue
+
+                    if swapped:
+                        modified_assets.append(target_path)
+
+                elif operation == "set_parameter":
+                    param_name = operation_args.get("parameter_name", "")
+                    param_value = operation_args.get("value")
+                    param_type = operation_args.get("parameter_type")
+                    if not param_name:
+                        continue
+
+                    if target_class != "MaterialInstanceConstant":
+                        continue
+
+                    try:
+                        result = json.loads(
+                            set_instance_parameter(target_path, param_name, param_value, param_type)
+                        )
+                        if result.get("success"):
+                            modified_assets.append(target_path)
+                    except Exception as e:
+                        errors.append({"path": target_path, "error": str(e)})
+
+                elif operation == "set_attribute":
+                    prop_name = operation_args.get("property_name", "")
+                    prop_value = operation_args.get("value", "")
+                    if not prop_name:
+                        continue
+
+                    if target_class != "Material":
+                        continue
+
+                    try:
+                        result = json.loads(
+                            set_property(target_path, prop_name, prop_value)
+                        )
+                        if result.get("success"):
+                            modified_assets.append(target_path)
+                    except Exception as e:
+                        errors.append({"path": target_path, "error": str(e)})
+
+            except Exception as e:
+                errors.append({"path": target_path, "error": str(e)})
+
+        return json.dumps({
+            "success": True,
+            "operation": operation,
+            "processed": len(targets),
+            "modified": len(modified_assets),
+            "modified_assets": modified_assets,
+            "errors": errors,
+        })
+    except Exception as exc:
+        return _error_json(exc)

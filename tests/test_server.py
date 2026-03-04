@@ -1271,3 +1271,41 @@ class TestReparentMaterialInstance:
 
         assert "Reparented" in result or "reparent" in result.lower()
         assert "/Game/M_New" in result
+
+
+class TestBatchUpdateMaterials:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_swap_texture(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "operation": "swap_texture",
+            "processed": 5,
+            "modified": 3,
+            "modified_assets": ["/Game/M_A", "/Game/M_B", "/Game/M_C"],
+            "errors": [],
+        })
+        result = server.batch_update_materials(
+            "/Game", "swap_texture",
+            operation_args='{"old_texture": "/Game/T_Old", "new_texture": "/Game/T_New"}'
+        )
+
+        assert "3 modified" in result or "modified" in result.lower()
+        assert "/Game/M_A" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_no_matches(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "operation": "set_parameter",
+            "processed": 10,
+            "modified": 0,
+            "modified_assets": [],
+            "errors": [],
+        })
+        result = server.batch_update_materials(
+            "/Game", "set_parameter",
+            operation_args='{"parameter_name": "Test", "value": "1.0"}'
+        )
+
+        assert "0" in result

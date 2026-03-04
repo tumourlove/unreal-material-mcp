@@ -1568,6 +1568,68 @@ def reparent_material_instance(
     return "\n".join(lines)
 
 
+@mcp.tool()
+def batch_update_materials(
+    base_path: str,
+    operation: str,
+    filter_query: str = "",
+    filter_type: str = "name",
+    operation_args: str = "{}",
+) -> str:
+    """Batch update materials: swap textures, set parameters, or set attributes.
+
+    Args:
+        base_path: Content path to search under
+        operation: 'swap_texture', 'set_parameter', or 'set_attribute'
+        filter_query: Filter string for targeting materials
+        filter_type: 'name', 'parameter', 'expression', 'shading_model'
+        operation_args: JSON string with operation-specific args
+    """
+    try:
+        args_dict = json.loads(operation_args)
+    except (json.JSONDecodeError, TypeError):
+        return f"Error: Invalid JSON for operation_args: {operation_args}"
+
+    args_repr = repr(args_dict)
+
+    script = (
+        f"result = material_helpers.batch_update("
+        f"'{_escape_py_string(base_path)}', "
+        f"'{_escape_py_string(operation)}', "
+        f"filter_query='{_escape_py_string(filter_query)}', "
+        f"filter_type='{_escape_py_string(filter_type)}', "
+        f"operation_args={args_repr})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    op = data.get("operation", operation)
+    processed = data.get("processed", 0)
+    modified = data.get("modified", 0)
+    assets = data.get("modified_assets", [])
+    errors = data.get("errors", [])
+
+    lines = [
+        f"Batch {op}: {modified} modified out of {processed} processed",
+    ]
+
+    if assets:
+        lines.append("  Modified:")
+        for a in assets:
+            lines.append(f"    {a}")
+
+    if errors:
+        lines.append(f"  Errors ({len(errors)}):")
+        for e in errors:
+            lines.append(f"    {e.get('path', '?')}: {e.get('error', '?')}")
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
