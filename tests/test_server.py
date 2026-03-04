@@ -1169,3 +1169,43 @@ class TestDuplicateExpressionSubgraph:
 
         assert "2" in result
         assert "MaterialExpressionMultiply_5" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 24: manage_material_parameter
+# ---------------------------------------------------------------------------
+
+class TestManageMaterialParameter:
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_add_parameter(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "action": "add",
+            "parameter_name": "Roughness",
+            "parameter_type": "scalar",
+            "expression_name": "MaterialExpressionScalarParameter_5",
+        })
+        result = server.manage_material_parameter(
+            "/Game/M_Foo", "add", "Roughness", parameter_type="scalar"
+        )
+
+        assert "Added" in result
+        assert "Roughness" in result
+
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_rename_parameter(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "action": "rename",
+            "old_name": "Param1",
+            "new_name": "Roughness",
+        })
+        result = server.manage_material_parameter(
+            "/Game/M_Foo", "rename", "Param1", new_name="Roughness"
+        )
+
+        assert "Renamed" in result or "renamed" in result
+        assert "Roughness" in result

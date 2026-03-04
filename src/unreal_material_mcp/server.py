@@ -1396,6 +1396,85 @@ def duplicate_expression_subgraph(
 
 
 # ---------------------------------------------------------------------------
+# Tool 24: manage_material_parameter
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def manage_material_parameter(
+    asset_path: str,
+    action: str,
+    parameter_name: str,
+    new_name: str | None = None,
+    parameter_type: str | None = None,
+    default_value: str | None = None,
+    group: str | None = None,
+) -> str:
+    """Add, remove, or rename a material parameter.
+
+    Args:
+        asset_path: Base material path
+        action: 'add', 'remove', or 'rename'
+        parameter_name: Target parameter name
+        new_name: New name (for 'rename')
+        parameter_type: Type for 'add' ('scalar', 'vector', 'texture', 'static_switch')
+        default_value: Default value for 'add' (JSON for complex types)
+        group: Parameter group for 'add'
+    """
+    parsed_default = None
+    if default_value is not None:
+        try:
+            parsed_default = json.loads(default_value)
+        except (json.JSONDecodeError, TypeError):
+            parsed_default = default_value
+
+    new_arg = f"'{_escape_py_string(new_name)}'" if new_name else "None"
+    type_arg = f"'{_escape_py_string(parameter_type)}'" if parameter_type else "None"
+    default_arg = repr(parsed_default) if parsed_default is not None else "None"
+    group_arg = f"'{_escape_py_string(group)}'" if group else "None"
+
+    script = (
+        f"result = material_helpers.manage_parameter("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(action)}', "
+        f"'{_escape_py_string(parameter_name)}', "
+        f"new_name={new_arg}, "
+        f"parameter_type={type_arg}, "
+        f"default_value={default_arg}, "
+        f"group={group_arg})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    act = data.get("action", action)
+    if act == "add":
+        lines = [
+            f"Added parameter: {data.get('parameter_name', parameter_name)} "
+            f"({data.get('parameter_type', parameter_type)})",
+            f"  Expression: {data.get('expression_name', 'N/A')}",
+            f"  Material: {data.get('asset_path', asset_path)}",
+        ]
+    elif act == "remove":
+        lines = [
+            f"Removed parameter: {data.get('parameter_name', parameter_name)}",
+            f"  Expression: {data.get('expression_name', 'N/A')}",
+            f"  Material: {data.get('asset_path', asset_path)}",
+        ]
+    elif act == "rename":
+        lines = [
+            f"Renamed: {data.get('old_name', parameter_name)} → {data.get('new_name', new_name)}",
+            f"  Material: {data.get('asset_path', asset_path)}",
+        ]
+    else:
+        lines = [f"Action: {act} completed"]
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

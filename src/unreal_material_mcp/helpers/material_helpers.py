@@ -2612,3 +2612,183 @@ def duplicate_subgraph(asset_path, root_expression, offset_x=0, offset_y=300):
         })
     except Exception as exc:
         return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# W10. manage_parameter
+# ---------------------------------------------------------------------------
+
+def manage_parameter(asset_path, action, parameter_name, new_name=None,
+                     parameter_type=None, default_value=None, group=None):
+    """Add, remove, or rename a material parameter.
+
+    Parameters
+    ----------
+    asset_path : str
+        Base material path.
+    action : str
+        "add", "remove", or "rename".
+    parameter_name : str
+        Target parameter name.
+    new_name : str or None
+        New name for "rename" action.
+    parameter_type : str or None
+        For "add": "scalar", "vector", "texture", "static_switch".
+    default_value
+        For "add": default value.
+    group : str or None
+        For "add": parameter group name.
+
+    Returns
+    -------
+    str
+        JSON confirmation.
+    """
+    try:
+        mat = _load_material(asset_path)
+        if _is_material_instance(mat):
+            return _error_json("Cannot manage parameters on a MaterialInstanceConstant.")
+
+        mel = _mel()
+        full_path = _full_object_path(asset_path)
+
+        if action == "add":
+            if not parameter_type:
+                return _error_json("parameter_type required for 'add' action")
+
+            type_to_class = {
+                "scalar": "ScalarParameter",
+                "vector": "VectorParameter",
+                "texture": "TextureSampleParameter2D",
+                "static_switch": "StaticSwitchParameter",
+            }
+            expr_class_name = type_to_class.get(parameter_type.lower())
+            if not expr_class_name:
+                return _error_json(f"Unknown parameter_type: {parameter_type}")
+
+            full_class = f"MaterialExpression{expr_class_name}"
+            expr_class = getattr(unreal, full_class, None)
+            if expr_class is None:
+                return _error_json(f"Class not found: {full_class}")
+
+            expr = mel.create_material_expression(mat, expr_class, 0, 0)
+            expr.set_editor_property("parameter_name", parameter_name)
+
+            if group:
+                try:
+                    expr.set_editor_property("group", group)
+                except Exception:
+                    pass
+
+            if default_value is not None:
+                try:
+                    if parameter_type.lower() == "scalar":
+                        expr.set_editor_property("default_value", float(default_value))
+                    elif parameter_type.lower() == "vector":
+                        if isinstance(default_value, dict):
+                            lc = unreal.LinearColor(
+                                r=float(default_value.get("r", 0)),
+                                g=float(default_value.get("g", 0)),
+                                b=float(default_value.get("b", 0)),
+                                a=float(default_value.get("a", 1)),
+                            )
+                            expr.set_editor_property("default_value", lc)
+                    elif parameter_type.lower() == "static_switch":
+                        expr.set_editor_property(
+                            "default_value",
+                            bool(default_value) if isinstance(default_value, bool)
+                            else str(default_value).lower() in ("true", "1", "yes")
+                        )
+                except Exception:
+                    pass
+
+            return json.dumps({
+                "success": True,
+                "asset_path": asset_path,
+                "action": "add",
+                "parameter_name": parameter_name,
+                "parameter_type": parameter_type,
+                "expression_name": _expr_id(expr),
+            })
+
+        elif action == "remove":
+            param_classes = ["ScalarParameter", "VectorParameter",
+                             "TextureSampleParameter2D", "StaticSwitchParameter",
+                             "TextureObjectParameter"]
+            found_expr = None
+            for cls in param_classes:
+                for i in range(200):
+                    obj_path = f"{full_path}:MaterialExpression{cls}_{i}"
+                    expr = unreal.find_object(None, obj_path)
+                    if expr is None:
+                        if i > 30:
+                            break
+                        continue
+                    try:
+                        pname = str(expr.get_editor_property("parameter_name"))
+                        if pname == parameter_name:
+                            found_expr = expr
+                            break
+                    except Exception:
+                        continue
+                if found_expr:
+                    break
+
+            if found_expr is None:
+                return _error_json(f"Parameter '{parameter_name}' not found")
+
+            expr_name = _expr_id(found_expr)
+            mel.delete_material_expression(mat, found_expr)
+
+            return json.dumps({
+                "success": True,
+                "asset_path": asset_path,
+                "action": "remove",
+                "parameter_name": parameter_name,
+                "expression_name": expr_name,
+            })
+
+        elif action == "rename":
+            if not new_name:
+                return _error_json("new_name required for 'rename' action")
+
+            param_classes = ["ScalarParameter", "VectorParameter",
+                             "TextureSampleParameter2D", "StaticSwitchParameter",
+                             "TextureObjectParameter"]
+            found_expr = None
+            for cls in param_classes:
+                for i in range(200):
+                    obj_path = f"{full_path}:MaterialExpression{cls}_{i}"
+                    expr = unreal.find_object(None, obj_path)
+                    if expr is None:
+                        if i > 30:
+                            break
+                        continue
+                    try:
+                        pname = str(expr.get_editor_property("parameter_name"))
+                        if pname == parameter_name:
+                            found_expr = expr
+                            break
+                    except Exception:
+                        continue
+                if found_expr:
+                    break
+
+            if found_expr is None:
+                return _error_json(f"Parameter '{parameter_name}' not found")
+
+            found_expr.set_editor_property("parameter_name", new_name)
+
+            return json.dumps({
+                "success": True,
+                "asset_path": asset_path,
+                "action": "rename",
+                "old_name": parameter_name,
+                "new_name": new_name,
+            })
+
+        else:
+            return _error_json(f"Unknown action: {action}")
+
+    except Exception as exc:
+        return _error_json(exc)
