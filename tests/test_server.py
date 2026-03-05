@@ -1348,3 +1348,224 @@ class TestBatchUpdateMaterials:
         )
 
         assert "0" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 29: create_material
+# ---------------------------------------------------------------------------
+
+class TestCreateMaterial:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_creation(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/Materials/M_New",
+            "blend_mode": "Opaque",
+            "shading_model": "DefaultLit",
+            "material_domain": "Surface",
+            "two_sided": False,
+        })
+        result = server.create_material("/Game/Materials/M_New")
+        assert "Created: /Game/Materials/M_New" in result
+        assert "Blend Mode: Opaque" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 30: duplicate_material
+# ---------------------------------------------------------------------------
+
+class TestDuplicateMaterial:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_duplicate(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "source_path": "/Game/M_A",
+            "destination_path": "/Game/M_B",
+        })
+        result = server.duplicate_material("/Game/M_A", "/Game/M_B")
+        assert "/Game/M_A" in result
+        assert "/Game/M_B" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 31: save_material
+# ---------------------------------------------------------------------------
+
+class TestSaveMaterial:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_save(self, _src):
+        _setup_tool_mock({"success": True, "asset_path": "/Game/M_Foo", "saved": True})
+        result = server.save_material("/Game/M_Foo")
+        assert "Saved:" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 32: disconnect_expressions
+# ---------------------------------------------------------------------------
+
+class TestDisconnectExpressions:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_disconnect(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "count": 2,
+            "disconnected": [
+                {"pin": "A", "was_connected_to": "Expr1"},
+                {"pin": "B", "was_connected_to": "Expr2"},
+            ],
+        })
+        result = server.disconnect_expressions("/Game/M_Foo", "MyExpr")
+        assert "Disconnected 2" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 33: create_custom_hlsl_node
+# ---------------------------------------------------------------------------
+
+class TestCreateCustomHlslNode:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_hlsl(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "expression_name": "MaterialExpressionCustom_0",
+            "output_type": "Float3",
+            "input_count": 2,
+            "additional_output_count": 1,
+        })
+        result = server.create_custom_hlsl_node("/Game/M_Foo", "return 0;")
+        assert "Custom HLSL" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 34: get_expression_details
+# ---------------------------------------------------------------------------
+
+class TestGetExpressionDetails:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_details(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "expression_name": "MaterialExpressionMultiply_0",
+            "class": "MaterialExpressionMultiply",
+            "properties": {"ConstA": "0.0"},
+            "inputs": [{"name": "A", "connected": True, "connected_to": "Expr1"}],
+            "outputs": [{"index": 0, "name": ""}],
+        })
+        result = server.get_expression_details("/Game/M_Foo", "MaterialExpressionMultiply_0")
+        assert "MaterialExpressionMultiply" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 36: validate_material
+# ---------------------------------------------------------------------------
+
+class TestValidateMaterial:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_validation(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "issues": [{"severity": "warning", "type": "island", "expression": "Expr1"}],
+            "issue_count": 1,
+            "fixed_count": 0,
+        })
+        result = server.validate_material("/Game/M_Foo")
+        assert "Issues found: 1" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 41: build_material_graph
+# ---------------------------------------------------------------------------
+
+class TestBuildMaterialGraph:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_build(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "asset_path": "/Game/M_Foo",
+            "nodes_created": 3,
+            "connections_made": 2,
+            "id_to_name": {"const": "MaterialExpressionConstant_0"},
+            "errors": [],
+        })
+        result = server.build_material_graph("/Game/M_Foo", '{"nodes":[]}')
+        assert "Nodes created: 3" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 42: list_material_templates
+# ---------------------------------------------------------------------------
+
+class TestListMaterialTemplates:
+    def test_lists_templates(self):
+        result = server.list_material_templates()
+        assert "noise_blend" in result
+        assert "pbr_texture_set" in result
+        assert "fresnel_glow" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 43: create_subgraph_from_template
+# ---------------------------------------------------------------------------
+
+class TestCreateSubgraphFromTemplate:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_template(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "nodes_created": 8,
+            "connections_made": 6,
+            "id_to_name": {"lerp": "MaterialExpressionLinearInterpolate_0"},
+        })
+        result = server.create_subgraph_from_template("/Game/M_Foo", "noise_blend")
+        assert "Template: noise_blend" in result
+        assert "Nodes created: 8" in result
+
+    def test_unknown_template_error(self):
+        result = server.create_subgraph_from_template("/Game/M_Foo", "nonexistent")
+        assert "Error" in result
+        assert "nonexistent" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 44: preview_material
+# ---------------------------------------------------------------------------
+
+class TestPreviewMaterial:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_preview(self, _src):
+        _setup_tool_mock({
+            "success": True,
+            "file_path": "/tmp/preview.png",
+            "width": 256,
+            "height": 256,
+        })
+        result = server.preview_material("/Game/M_Foo")
+        assert "Preview saved" in result
+
+
+# ---------------------------------------------------------------------------
+# Tool 46: create_material_from_textures
+# ---------------------------------------------------------------------------
+
+class TestCreateMaterialFromTextures:
+    @patch.object(server, "_get_helper_source", return_value="# src\n")
+    def test_formats_auto_build(self, _src):
+        # Need two sequential calls (create + build)
+        server._project_path = "/tmp/TestProject"
+        server._helper_uploaded = False
+        server._helper_hash = ""
+        mock_bridge = MagicMock()
+        mock_bridge.run_command.side_effect = [
+            {"success": True, "output": "helper_uploaded"},
+            {"success": True, "output": json.dumps({"success": True, "asset_path": "/Game/M_Auto"})},
+            {"success": True, "output": json.dumps({
+                "success": True, "nodes_created": 5, "connections_made": 4,
+            })},
+        ]
+        server._bridge = mock_bridge
+        result = server.create_material_from_textures(
+            "/Game/M_Auto",
+            '{"base_color": "/Game/T_Albedo", "normal": "/Game/T_Normal"}'
+        )
+        assert "Created PBR material" in result

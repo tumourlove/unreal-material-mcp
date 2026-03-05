@@ -29,6 +29,18 @@ def _eal():
     return unreal.EditorAssetLibrary
 
 
+def _has_cpp_plugin():
+    """Check if MaterialMCPReader C++ plugin is available."""
+    try:
+        return hasattr(unreal, 'MaterialMCPReaderLibrary')
+    except Exception:
+        return False
+
+def _cpp():
+    """Return MaterialMCPReaderLibrary (lazy)."""
+    return unreal.MaterialMCPReaderLibrary
+
+
 # ---------------------------------------------------------------------------
 # Known expression class names (without the 'MaterialExpression' prefix).
 # ---------------------------------------------------------------------------
@@ -96,6 +108,27 @@ _MATERIAL_PROPERTIES = [
     ("PixelDepthOffset", "MP_PIXEL_DEPTH_OFFSET"),
     ("ShadingModel", "MP_SHADING_MODEL"),
 ]
+
+# Map material property label -> Python enum value for connect_material_property
+_MATERIAL_PROPERTY_MAP = {}
+try:
+    _MATERIAL_PROPERTY_MAP = {
+        "BaseColor": unreal.MaterialProperty.MP_BASE_COLOR,
+        "Metallic": unreal.MaterialProperty.MP_METALLIC,
+        "Specular": unreal.MaterialProperty.MP_SPECULAR,
+        "Roughness": unreal.MaterialProperty.MP_ROUGHNESS,
+        "EmissiveColor": unreal.MaterialProperty.MP_EMISSIVE_COLOR,
+        "Opacity": unreal.MaterialProperty.MP_OPACITY,
+        "OpacityMask": unreal.MaterialProperty.MP_OPACITY_MASK,
+        "Normal": unreal.MaterialProperty.MP_NORMAL,
+        "WorldPositionOffset": unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET,
+        "SubsurfaceColor": unreal.MaterialProperty.MP_SUBSURFACE_COLOR,
+        "AmbientOcclusion": unreal.MaterialProperty.MP_AMBIENT_OCCLUSION,
+        "Refraction": unreal.MaterialProperty.MP_REFRACTION,
+        "PixelDepthOffset": unreal.MaterialProperty.MP_PIXEL_DEPTH_OFFSET,
+    }
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -533,6 +566,24 @@ def scan_all_expressions(asset_path, class_filter=None):
         JSON with ``success``, ``expression_count``, and ``expressions`` list.
     """
     try:
+        # Fast path: C++ plugin for native-speed expression iteration
+        if _has_cpp_plugin():
+            raw = _cpp().get_all_expressions(asset_path)
+            data = json.loads(raw)
+            if not data.get('success'):
+                return raw
+            if class_filter:
+                data['expressions'] = [
+                    e for e in data.get('expressions', [])
+                    if class_filter.lower() in e.get('class', '').lower()
+                ]
+                data['found_expression_count'] = len(data['expressions'])
+            else:
+                data['found_expression_count'] = len(data.get('expressions', []))
+            data['expected_expression_count'] = data.get('expression_count', -1)
+            return json.dumps(data)
+
+        # Slow path: brute-force scan (existing code below)
         mat = _load_material(asset_path)
         mel = _mel()
 
@@ -3178,5 +3229,384 @@ def batch_update(base_path, operation, filter_query="", filter_type="name",
             "modified_assets": modified_assets,
             "errors": errors,
         })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+# ---------------------------------------------------------------------------
+# Task 12: New helper functions
+# ---------------------------------------------------------------------------
+
+def create_material(asset_path, blend_mode="Opaque", shading_model="DefaultLit",
+                    material_domain="Surface", two_sided=False):
+    """Create a new base Material asset."""
+    try:
+        eal = _eal()
+        if eal.does_asset_exist(asset_path):
+            return _error_json(f"Asset already exists: {asset_path}")
+
+        pkg, name = _asset_parts(asset_path)
+        factory = unreal.MaterialFactoryNew()
+        tools = unreal.AssetToolsHelpers.get_asset_tools()
+        mat = tools.create_asset(name, pkg, unreal.Material, factory)
+
+        if mat is None:
+            return _error_json(f"Failed to create material at {asset_path}")
+
+        # Set properties via set_editor_property
+        try:
+            mat.set_editor_property("blend_mode", getattr(unreal.BlendMode, blend_mode.upper(), unreal.BlendMode.BLEND_OPAQUE))
+        except Exception:
+            pass
+        try:
+            mat.set_editor_property("shading_model", getattr(unreal.MaterialShadingModel, shading_model.upper(), unreal.MaterialShadingModel.MSM_DEFAULT_LIT))
+        except Exception:
+            pass
+        try:
+            mat.set_editor_property("material_domain", getattr(unreal.MaterialDomain, material_domain.upper(), unreal.MaterialDomain.MD_SURFACE))
+        except Exception:
+            pass
+        if two_sided:
+            mat.set_editor_property("two_sided", True)
+
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "blend_mode": blend_mode,
+            "shading_model": shading_model,
+            "material_domain": material_domain,
+            "two_sided": two_sided,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def duplicate_material(source_path, destination_path):
+    """Deep-copy a material to a new path."""
+    try:
+        eal = _eal()
+        if not eal.does_asset_exist(source_path):
+            return _error_json(f"Source not found: {source_path}")
+
+        result = eal.duplicate_asset(source_path, destination_path)
+        if not result:
+            return _error_json(f"Failed to duplicate {source_path} to {destination_path}")
+
+        return json.dumps({
+            "success": True,
+            "source_path": source_path,
+            "destination_path": destination_path,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def save_material(asset_path):
+    """Save a material asset to disk."""
+    try:
+        eal = _eal()
+        if not eal.does_asset_exist(asset_path):
+            return _error_json(f"Asset not found: {asset_path}")
+
+        result = eal.save_asset(asset_path)
+        return json.dumps({
+            "success": True,
+            "asset_path": asset_path,
+            "saved": bool(result),
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def build_graph_from_spec(asset_path, graph_spec_json, clear_existing=False):
+    """Build an entire material graph from a JSON spec in one call.
+
+    Uses C++ plugin for native speed if available, otherwise falls back
+    to sequential Python calls.
+    """
+    try:
+        if _has_cpp_plugin():
+            raw = _cpp().build_material_graph(asset_path, graph_spec_json, clear_existing)
+            return raw
+
+        # Fallback: parse spec and create nodes one by one via Python
+        spec = json.loads(graph_spec_json)
+        mel = _mel()
+        mat = _load_material(asset_path)
+
+        if clear_existing:
+            mel.delete_all_material_expressions(mat)
+
+        id_to_name = {}
+        nodes_created = 0
+        connections_made = 0
+        errors = []
+
+        # Create nodes
+        for node in spec.get("nodes", []):
+            node_id = node.get("id", "")
+            class_name = node.get("class", "")
+            pos = node.get("pos", [0, 0])
+
+            full_class = class_name
+            if not class_name.startswith("MaterialExpression"):
+                full_class = f"MaterialExpression{class_name}"
+
+            try:
+                expr_class = unreal.find_class(f"/Script/Engine.{full_class}")
+                if expr_class is None:
+                    errors.append({"node_id": node_id, "error": f"Class not found: {full_class}"})
+                    continue
+                expr = mel.create_material_expression(mat, expr_class, pos[0] if len(pos) > 0 else 0, pos[1] if len(pos) > 1 else 0)
+                if expr:
+                    id_to_name[node_id] = expr.get_name()
+                    nodes_created += 1
+                    # Set properties
+                    for prop_name, prop_val in node.get("props", {}).items():
+                        try:
+                            expr.set_editor_property(prop_name, prop_val)
+                        except Exception:
+                            pass
+            except Exception as e:
+                errors.append({"node_id": node_id, "error": str(e)})
+
+        # Wire connections
+        for conn in spec.get("connections", []):
+            try:
+                from_name = id_to_name.get(conn.get("from", ""))
+                to_name = id_to_name.get(conn.get("to", ""))
+                if from_name and to_name:
+                    # Need to find actual expression objects by name
+                    from_expr = unreal.find_object(None, f"{_full_object_path(asset_path)}:{from_name}")
+                    to_expr = unreal.find_object(None, f"{_full_object_path(asset_path)}:{to_name}")
+                    if from_expr and to_expr:
+                        ok = mel.connect_material_expressions(from_expr, conn.get("from_pin", ""), to_expr, conn.get("to_pin", ""))
+                        if ok:
+                            connections_made += 1
+            except Exception as e:
+                errors.append({"connection": f"{conn.get('from')}->{conn.get('to')}", "error": str(e)})
+
+        # Wire material outputs
+        for out in spec.get("outputs", []):
+            try:
+                from_name = id_to_name.get(out.get("from", ""))
+                if from_name:
+                    from_expr = unreal.find_object(None, f"{_full_object_path(asset_path)}:{from_name}")
+                    if from_expr:
+                        prop_name = out.get("to_property", "")
+                        prop_enum = _MATERIAL_PROPERTY_MAP.get(prop_name)
+                        if prop_enum:
+                            ok = mel.connect_material_property(from_expr, out.get("from_pin", ""), prop_enum)
+                            if ok:
+                                connections_made += 1
+            except Exception as e:
+                errors.append({"output": out.get("to_property", ""), "error": str(e)})
+
+        return json.dumps({
+            "success": len(errors) == 0,
+            "asset_path": asset_path,
+            "nodes_created": nodes_created,
+            "connections_made": connections_made,
+            "id_to_name": id_to_name,
+            "errors": errors,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def export_graph(asset_path):
+    """Export complete material graph to JSON (round-trippable with build_graph_from_spec)."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().export_material_graph(asset_path)
+        return _error_json("ExportMaterialGraph requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def import_graph(asset_path, graph_json, mode="overwrite"):
+    """Import a material graph from JSON. mode: 'overwrite' or 'merge'."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().import_material_graph(asset_path, graph_json, mode)
+        return _error_json("ImportMaterialGraph requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def validate_material(asset_path, fix_issues=False):
+    """Validate material graph health: islands, broken refs, naming conflicts."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().validate_material(asset_path, fix_issues)
+        return _error_json("ValidateMaterial requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def render_preview(asset_path, resolution=256):
+    """Render material preview to PNG file."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().render_material_preview(asset_path, resolution)
+        return _error_json("RenderMaterialPreview requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def get_thumbnail(asset_path, resolution=256):
+    """Get material thumbnail as base64-encoded PNG."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().get_material_thumbnail(asset_path, resolution)
+        return _error_json("GetMaterialThumbnail requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def create_custom_hlsl(asset_path, code, description="", output_type="Float3",
+                       inputs_json="[]", additional_outputs_json="[]",
+                       pos_x=0, pos_y=0):
+    """Create a Custom HLSL expression node."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().create_custom_hlsl_node(
+                asset_path, code, description, output_type,
+                inputs_json, additional_outputs_json, pos_x, pos_y)
+        return _error_json("CreateCustomHLSLNode requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def get_layer_info(asset_path):
+    """Get Material Layer or Material Layer Blend info."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().get_material_layer_info(asset_path)
+        return _error_json("GetMaterialLayerInfo requires the MaterialMCPReader C++ plugin")
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def disconnect_expressions(asset_path, expression_name, input_name="", disconnect_outputs=False):
+    """Disconnect wires on an expression without deleting it."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().disconnect_expression(
+                asset_path, expression_name, input_name, disconnect_outputs)
+
+        # Python fallback: disconnect via MEL
+        mat = _load_material(asset_path)
+        mel = _mel()
+        full_path = _full_object_path(asset_path)
+
+        if not expression_name.startswith("MaterialExpression"):
+            expression_name = f"MaterialExpression{expression_name}"
+        obj_path = f"{full_path}:{expression_name}"
+        expr = unreal.find_object(None, obj_path)
+        if expr is None:
+            return _error_json(f"Expression not found: {obj_path}")
+
+        disconnected = []
+        try:
+            input_names = [str(n) for n in mel.get_material_expression_input_names(expr)]
+        except Exception:
+            input_names = []
+
+        try:
+            connected = mel.get_inputs_for_material_expression(mat, expr)
+        except Exception:
+            connected = []
+
+        count = 0
+        for idx, conn_expr in enumerate(connected):
+            if conn_expr is None:
+                continue
+            in_name = input_names[idx] if idx < len(input_names) else f"Input_{idx}"
+            if input_name and in_name != input_name:
+                continue
+            disconnected.append({
+                "pin": in_name,
+                "was_connected_to": _expr_id(conn_expr),
+            })
+            count += 1
+
+        return json.dumps({
+            "success": True,
+            "count": count,
+            "disconnected": disconnected,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def get_expression_details(asset_path, expression_name):
+    """Get detailed information about a single expression node."""
+    try:
+        if _has_cpp_plugin():
+            return _cpp().get_expression_details(asset_path, expression_name)
+
+        # Python fallback
+        mat = _load_material(asset_path)
+        mel = _mel()
+        full_path = _full_object_path(asset_path)
+
+        if not expression_name.startswith("MaterialExpression"):
+            expression_name = f"MaterialExpression{expression_name}"
+        obj_path = f"{full_path}:{expression_name}"
+        expr = unreal.find_object(None, obj_path)
+        if expr is None:
+            return _error_json(f"Expression not found: {obj_path}")
+
+        class_name = type(expr).__name__
+        short_class = class_name.replace("MaterialExpression", "")
+
+        props = _extract_expression_props(expr, short_class)
+
+        # Inputs
+        inputs = []
+        try:
+            input_names = [str(n) for n in mel.get_material_expression_input_names(expr)]
+            connected = mel.get_inputs_for_material_expression(mat, expr)
+            for idx in range(max(len(input_names), len(connected))):
+                in_name = input_names[idx] if idx < len(input_names) else f"Input_{idx}"
+                conn = connected[idx] if idx < len(connected) else None
+                inp_entry = {"name": in_name, "connected": conn is not None}
+                if conn is not None:
+                    inp_entry["connected_to"] = _expr_id(conn)
+                inputs.append(inp_entry)
+        except Exception:
+            pass
+
+        # Outputs
+        outputs = []
+        try:
+            out_names = mel.get_material_expression_output_names(expr)
+            for idx, oname in enumerate(out_names):
+                outputs.append({"index": idx, "name": str(oname) if str(oname) else ""})
+        except Exception:
+            outputs.append({"index": 0, "name": ""})
+
+        return json.dumps({
+            "success": True,
+            "expression_name": expression_name,
+            "class": class_name,
+            "properties": props,
+            "inputs": inputs,
+            "outputs": outputs,
+        })
+    except Exception as exc:
+        return _error_json(exc)
+
+
+def copy_material_graph(source_path, destination_path):
+    """Copy the entire node graph from one material to another (merge mode)."""
+    try:
+        # Export from source then import to destination
+        exported = export_graph(source_path)
+        export_data = json.loads(exported)
+        if not export_data.get("success"):
+            return exported
+        return import_graph(destination_path, json.dumps(export_data), mode="merge")
     except Exception as exc:
         return _error_json(exc)

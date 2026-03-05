@@ -1,4 +1,4 @@
-"""MCP server with 10 tools for UE Material graph intelligence."""
+"""MCP server with 40+ tools for UE Material graph intelligence."""
 
 from __future__ import annotations
 
@@ -581,14 +581,15 @@ def get_material_dependencies(asset_path: str) -> str:
     sources = data.get("parameter_sources", [])
     lines.append(f"  Parameter Sources ({len(sources)}):")
     if sources:
-        # Group: show non-local sources explicitly, summarize local ones
-        non_local = [s for s in sources if isinstance(s, dict) and s.get("source") not in ("local", None)]
-        local_count = len(sources) - len(non_local)
-        if non_local:
-            for s in non_local:
-                lines.append(f"    {s.get('name', '?')} ({s.get('type', '?')}) -> {s.get('source', '?')}")
-        if local_count > 0:
-            lines.append(f"    ({local_count} parameter(s) defined locally)")
+        for s in sources:
+            if isinstance(s, str):
+                lines.append(f"    {s}")
+            elif isinstance(s, dict):
+                source_path = s.get("source", "local")
+                if source_path not in ("local", None):
+                    lines.append(f"    {s.get('name', '?')} ({s.get('type', '?')}) -> {source_path}")
+                else:
+                    lines.append(f"    {s.get('name', '?')} (local)")
     else:
         lines.append("    (none)")
 
@@ -1666,6 +1667,748 @@ def batch_update_materials(
         for e in errors:
             lines.append(f"    {e.get('path', '?')}: {e.get('error', '?')}")
 
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 29: create_material
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def create_material(
+    asset_path: str,
+    blend_mode: str = "Opaque",
+    shading_model: str = "DefaultLit",
+    material_domain: str = "Surface",
+    two_sided: bool = False,
+) -> str:
+    """Create a new base Material asset from scratch.
+
+    Args:
+        asset_path: Save path, e.g. '/Game/Materials/M_NewMaterial'
+        blend_mode: Blend mode (Opaque, Masked, Translucent, etc.)
+        shading_model: Shading model (DefaultLit, Unlit, SubsurfaceProfile, etc.)
+        material_domain: Material domain (Surface, DeferredDecal, PostProcess, etc.)
+        two_sided: Whether the material renders on both sides
+    """
+    script = (
+        f"result = material_helpers.create_material("
+        f"'{_escape_py_string(asset_path)}', "
+        f"blend_mode='{_escape_py_string(blend_mode)}', "
+        f"shading_model='{_escape_py_string(shading_model)}', "
+        f"material_domain='{_escape_py_string(material_domain)}', "
+        f"two_sided={two_sided})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    lines = [
+        f"Created: {data.get('asset_path', asset_path)}",
+        f"  Blend Mode: {data.get('blend_mode', 'N/A')}",
+        f"  Shading Model: {data.get('shading_model', 'N/A')}",
+        f"  Domain: {data.get('material_domain', 'N/A')}",
+        f"  Two Sided: {data.get('two_sided', False)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 30: duplicate_material
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def duplicate_material(source_path: str, destination_path: str) -> str:
+    """Deep-copy a material to a new asset path.
+
+    Args:
+        source_path: Source material path
+        destination_path: Destination path for the copy
+    """
+    script = (
+        f"result = material_helpers.duplicate_material("
+        f"'{_escape_py_string(source_path)}', "
+        f"'{_escape_py_string(destination_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    return f"Duplicated {data.get('source_path')} -> {data.get('destination_path')}"
+
+
+# ---------------------------------------------------------------------------
+# Tool 31: save_material
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def save_material(asset_path: str) -> str:
+    """Save a material asset to disk.
+
+    Args:
+        asset_path: Material asset path
+    """
+    script = (
+        f"result = material_helpers.save_material('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    return f"Saved: {data.get('asset_path')} (success: {data.get('saved', False)})"
+
+
+# ---------------------------------------------------------------------------
+# Tool 32: disconnect_expressions
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def disconnect_expressions(
+    asset_path: str,
+    expression_name: str,
+    input_name: str = "",
+    disconnect_outputs: bool = False,
+) -> str:
+    """Disconnect wires on an expression without deleting it.
+
+    Args:
+        asset_path: Material asset path
+        expression_name: Name of the expression to disconnect
+        input_name: Specific input pin to disconnect (empty = all inputs)
+        disconnect_outputs: If True, disconnect downstream connections instead of inputs
+    """
+    script = (
+        f"result = material_helpers.disconnect_expressions("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(expression_name)}', "
+        f"input_name='{_escape_py_string(input_name)}', "
+        f"disconnect_outputs={disconnect_outputs})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    count = data.get("count", 0)
+    lines = [f"Disconnected {count} wire(s) on {expression_name}"]
+    for d in data.get("disconnected", []):
+        lines.append(f"  {d.get('pin', '?')}: was connected to {d.get('was_connected_to', d.get('expression', '?'))}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 33: create_custom_hlsl_node
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def create_custom_hlsl_node(
+    asset_path: str,
+    code: str,
+    description: str = "",
+    output_type: str = "Float3",
+    inputs: str = "[]",
+    additional_outputs: str = "[]",
+    pos_x: int = 0,
+    pos_y: int = 0,
+) -> str:
+    """Create a Custom HLSL expression node with code, inputs, and outputs.
+
+    Args:
+        asset_path: Material asset path
+        code: HLSL code for the custom node
+        description: Description label for the node
+        output_type: Main output type (Float1, Float2, Float3, Float4)
+        inputs: JSON array of input definitions, e.g. [{"name": "UV"}]
+        additional_outputs: JSON array of extra outputs, e.g. [{"name": "Mask", "type": "Float1"}]
+        pos_x: X position in the material graph
+        pos_y: Y position in the material graph
+    """
+    script = (
+        f"result = material_helpers.create_custom_hlsl("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'''{_escape_py_string(code)}''', "
+        f"description='{_escape_py_string(description)}', "
+        f"output_type='{_escape_py_string(output_type)}', "
+        f"inputs_json='{_escape_py_string(inputs)}', "
+        f"additional_outputs_json='{_escape_py_string(additional_outputs)}', "
+        f"pos_x={pos_x}, pos_y={pos_y})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    lines = [
+        f"Created Custom HLSL: {data.get('expression_name', '?')}",
+        f"  Output Type: {data.get('output_type', output_type)}",
+        f"  Inputs: {data.get('input_count', 0)}",
+        f"  Additional Outputs: {data.get('additional_output_count', 0)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 34: get_expression_details
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_expression_details(asset_path: str, expression_name: str) -> str:
+    """Get detailed information about a single expression node including all properties, inputs, and outputs.
+
+    Args:
+        asset_path: Material asset path
+        expression_name: Name of the expression (e.g. 'MaterialExpressionMultiply_0')
+    """
+    script = (
+        f"result = material_helpers.get_expression_details("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'{_escape_py_string(expression_name)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    lines = [
+        f"Expression: {data.get('expression_name', expression_name)}",
+        f"  Class: {data.get('class', '?')}",
+    ]
+    props = data.get("properties", {})
+    if props:
+        lines.append("  Properties:")
+        for k, v in list(props.items())[:30]:  # Limit to 30 most relevant
+            lines.append(f"    {k}: {v}")
+        if len(props) > 30:
+            lines.append(f"    ... and {len(props) - 30} more")
+    inputs = data.get("inputs", [])
+    if inputs:
+        lines.append("  Inputs:")
+        for inp in inputs:
+            conn = f" -> {inp.get('connected_to', '?')}" if inp.get("connected") else " (disconnected)"
+            lines.append(f"    {inp.get('name', '?')}{conn}")
+    outputs = data.get("outputs", [])
+    if outputs:
+        lines.append("  Outputs:")
+        for out in outputs:
+            lines.append(f"    [{out.get('index', '?')}] {out.get('name', '?')}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 35: get_material_layer_info
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_material_layer_info(asset_path: str) -> str:
+    """Get Material Layer or Material Layer Blend info.
+
+    Args:
+        asset_path: Asset path of the material function/layer
+    """
+    script = (
+        f"result = material_helpers.get_layer_info('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    lines = [
+        f"Asset: {data.get('asset_path', asset_path)}",
+        f"  Type: {data.get('type', '?')}",
+        f"  Description: {data.get('description', 'N/A')}",
+        f"  Expressions: {data.get('expression_count', 0)}",
+    ]
+    for inp in data.get("inputs", []):
+        lines.append(f"  Input: {inp.get('name', '?')} (priority: {inp.get('sort_priority', 0)})")
+    for out in data.get("outputs", []):
+        lines.append(f"  Output: {out.get('name', '?')} (priority: {out.get('sort_priority', 0)})")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 36: validate_material
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def validate_material(asset_path: str, fix_issues: bool = False) -> str:
+    """Validate material graph health: find islands, broken refs, duplicate params, unused nodes.
+
+    Args:
+        asset_path: Material asset path
+        fix_issues: If True, attempt to auto-fix issues (delete islands, etc.)
+    """
+    script = (
+        f"result = material_helpers.validate_material("
+        f"'{_escape_py_string(asset_path)}', "
+        f"fix_issues={fix_issues})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    issues = data.get("issues", [])
+    fixed = data.get("fixed_count", 0)
+    lines = [f"Validation: {data.get('asset_path', asset_path)}"]
+    lines.append(f"  Issues found: {len(issues)}")
+    if fixed:
+        lines.append(f"  Issues fixed: {fixed}")
+    for issue in issues:
+        severity = issue.get("severity", "?").upper()
+        msg = issue.get("message", issue.get("type", "?"))
+        expr = issue.get("expression", "")
+        fixed_flag = " [FIXED]" if issue.get("fixed") else ""
+        lines.append(f"  [{severity}] {msg}{': ' + expr if expr else ''}{fixed_flag}")
+    if not issues:
+        lines.append("  No issues found!")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 37: export_material_graph
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def export_material_graph(asset_path: str, export_name: str = "") -> str:
+    """Export a material's complete node graph to a JSON file for backup or transfer.
+
+    Args:
+        asset_path: Material asset path
+        export_name: Custom name for the export file (defaults to material name)
+    """
+    script = (
+        f"result = material_helpers.export_graph('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    nodes = len(data.get("nodes", []))
+    conns = len(data.get("connections", []))
+    lines = [
+        f"Exported: {data.get('asset_path', asset_path)}",
+        f"  Nodes: {nodes}",
+        f"  Connections: {conns}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 38: import_material_graph
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def import_material_graph(
+    asset_path: str,
+    graph_json: str,
+    mode: str = "overwrite",
+) -> str:
+    """Import a material graph from a JSON spec. Use with export_material_graph for backup/transfer.
+
+    Args:
+        asset_path: Target material asset path
+        graph_json: JSON string with the graph spec (from export_material_graph)
+        mode: 'overwrite' replaces existing graph, 'merge' adds to existing
+    """
+    script = (
+        f"result = material_helpers.import_graph("
+        f"'{_escape_py_string(asset_path)}', "
+        f"'''{_escape_py_string(graph_json)}''', "
+        f"mode='{_escape_py_string(mode)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    lines = [
+        f"Imported to: {data.get('asset_path', asset_path)}",
+        f"  Mode: {mode}",
+        f"  Nodes created: {data.get('nodes_created', 0)}",
+        f"  Connections made: {data.get('connections_made', 0)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 39: copy_material_graph
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def copy_material_graph(
+    source_path: str,
+    destination_path: str,
+) -> str:
+    """Copy the entire node graph from one material to another (merge mode).
+
+    Args:
+        source_path: Source material to copy from
+        destination_path: Destination material to paste into
+    """
+    script = (
+        f"result = material_helpers.copy_material_graph("
+        f"'{_escape_py_string(source_path)}', "
+        f"'{_escape_py_string(destination_path)}')\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    lines = [
+        f"Copied graph: {source_path} -> {destination_path}",
+        f"  Nodes created: {data.get('nodes_created', 0)}",
+        f"  Connections made: {data.get('connections_made', 0)}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 40: run_material_script
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def run_material_script(code: str) -> str:
+    """Execute arbitrary Python in the editor with material_helpers pre-imported.
+
+    The material_helpers module is available as 'material_helpers'.
+    The 'unreal' and 'json' modules are also imported.
+    Must print output to stdout.
+
+    Args:
+        code: Python code to execute
+    """
+    _ensure_helper_uploaded()
+    saved_dir = _project_path.replace("\\", "/") + "/Saved/MaterialMCP"
+    preamble = (
+        "import sys, json\n"
+        f"sys.path.insert(0, '{saved_dir}')\n"
+        "import importlib, material_helpers\n"
+        "importlib.reload(material_helpers)\n"
+    )
+    full_script = preamble + code
+    bridge = _get_bridge()
+    result = bridge.run_command(full_script)
+    output = result.get("output", "") or result.get("result", "") or ""
+    if isinstance(output, list):
+        parts = []
+        for item in output:
+            if isinstance(item, dict):
+                parts.append(item.get("output", str(item)))
+            else:
+                parts.append(str(item))
+        output = "\n".join(parts)
+    return str(output).strip()
+
+
+# ---------------------------------------------------------------------------
+# Tool 41: build_material_graph
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def build_material_graph(
+    asset_path: str,
+    graph_spec: str,
+    clear_existing: bool = False,
+) -> str:
+    """Build an entire material node graph from a declarative JSON spec in one call.
+
+    The spec defines nodes with IDs, connections between them, and material output wiring.
+    Uses native C++ for speed when the MaterialMCPReader plugin is available.
+
+    Example spec:
+    {
+        "nodes": [
+            {"id": "const", "class": "Constant3Vector", "pos": [-400, 0],
+             "props": {"Constant": "(R=1.0,G=0.0,B=0.0)"}},
+            {"id": "mul", "class": "Multiply", "pos": [-200, 0]}
+        ],
+        "connections": [
+            {"from": "const", "to": "mul", "from_pin": "", "to_pin": "A"}
+        ],
+        "outputs": [
+            {"from": "mul", "from_pin": "", "to_property": "BaseColor"}
+        ]
+    }
+
+    Args:
+        asset_path: Material to build graph in
+        graph_spec: JSON string with nodes, connections, outputs arrays
+        clear_existing: If True, delete all existing expressions first
+    """
+    try:
+        spec = json.loads(graph_spec)
+    except (json.JSONDecodeError, TypeError):
+        return "Error: Invalid JSON for graph_spec"
+
+    script = (
+        f"spec = {repr(spec)}\n"
+        f"result = material_helpers.build_graph_from_spec("
+        f"'{_escape_py_string(asset_path)}', "
+        f"json.dumps(spec), "
+        f"clear_existing={clear_existing})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    lines = [
+        f"Material: {data.get('asset_path', asset_path)}",
+        f"  Nodes created: {data.get('nodes_created', 0)}",
+        f"  Connections made: {data.get('connections_made', 0)}",
+    ]
+
+    id_map = data.get("id_to_name", {})
+    if id_map:
+        lines.append("  ID -> Expression mapping:")
+        for spec_id, expr_name in id_map.items():
+            lines.append(f"    {spec_id} -> {expr_name}")
+
+    errors = data.get("errors", [])
+    if errors:
+        lines.append(f"  Errors ({len(errors)}):")
+        for e in errors:
+            lines.append(f"    {e.get('node_id', e.get('id', '?'))}: {e.get('error', '?')}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 42: list_material_templates
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def list_material_templates() -> str:
+    """List all available material graph templates that can be used with create_subgraph_from_template."""
+    from unreal_material_mcp.templates.material_templates import list_templates
+    templates = list_templates()
+    lines = ["Available templates:"]
+    for name, desc in templates.items():
+        lines.append(f"  {name}: {desc}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 43: create_subgraph_from_template
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def create_subgraph_from_template(
+    asset_path: str,
+    template_name: str,
+    params: str = "{}",
+    node_pos_x: int = 0,
+    node_pos_y: int = 0,
+) -> str:
+    """Create a pre-built procedural material pattern as a subgraph.
+
+    Available templates: noise_blend, pbr_texture_set, fresnel_glow.
+    Use list_material_templates to see descriptions.
+
+    Args:
+        asset_path: Material to add subgraph to
+        template_name: Template identifier
+        params: JSON string with template-specific parameter overrides
+        node_pos_x: X offset for the subgraph position
+        node_pos_y: Y offset for the subgraph position
+    """
+    from unreal_material_mcp.templates.material_templates import get_template_spec, list_templates
+
+    try:
+        template_params = json.loads(params)
+    except (json.JSONDecodeError, TypeError):
+        return "Error: Invalid JSON for params"
+
+    spec = get_template_spec(template_name, template_params)
+    if spec is None:
+        available = ", ".join(list_templates().keys())
+        return f"Error: Unknown template '{template_name}'. Available: {available}"
+
+    # Apply position offset to all nodes
+    for node in spec.get("nodes", []):
+        pos = node.get("pos", [0, 0])
+        node["pos"] = [pos[0] + node_pos_x, pos[1] + node_pos_y]
+    for node in spec.get("custom_hlsl_nodes", []):
+        pos = node.get("pos", [0, 0])
+        node["pos"] = [pos[0] + node_pos_x, pos[1] + node_pos_y]
+
+    script = (
+        f"spec = {repr(spec)}\n"
+        f"result = material_helpers.build_graph_from_spec("
+        f"'{_escape_py_string(asset_path)}', "
+        f"json.dumps(spec), "
+        f"clear_existing=False)\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+
+    exposed = spec.get("_exposed_params", [])
+    output_node = spec.get("_output_node", "")
+
+    lines = [
+        f"Template: {template_name}",
+        f"  Nodes created: {data.get('nodes_created', 0)}",
+        f"  Connections made: {data.get('connections_made', 0)}",
+    ]
+    if exposed:
+        lines.append(f"  Exposed parameters: {', '.join(exposed)}")
+    if output_node:
+        mapped_name = data.get("id_to_name", {}).get(output_node, output_node)
+        lines.append(f"  Output node: {mapped_name}")
+        lines.append("  Wire this to a material output or another subgraph.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool 44: preview_material
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def preview_material(asset_path: str, resolution: int = 256) -> str:
+    """Render a material preview and save to PNG.
+
+    Args:
+        asset_path: Material asset path
+        resolution: Preview image resolution (default 256)
+    """
+    script = (
+        f"result = material_helpers.render_preview("
+        f"'{_escape_py_string(asset_path)}', resolution={resolution})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    return f"Preview saved: {data.get('file_path', 'N/A')} ({data.get('width', '?')}x{data.get('height', '?')})"
+
+
+# ---------------------------------------------------------------------------
+# Tool 45: get_material_thumbnail
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_material_thumbnail(asset_path: str, resolution: int = 256) -> str:
+    """Get material thumbnail as base64-encoded PNG data.
+
+    Args:
+        asset_path: Material asset path
+        resolution: Thumbnail resolution (default 256)
+    """
+    script = (
+        f"result = material_helpers.get_thumbnail("
+        f"'{_escape_py_string(asset_path)}', resolution={resolution})\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(script)
+    err = _format_error(data)
+    if err:
+        return f"Error: {err}"
+    data_len = len(data.get("data", ""))
+    return f"Thumbnail: {data.get('width', '?')}x{data.get('height', '?')} ({data_len} bytes base64)"
+
+
+# ---------------------------------------------------------------------------
+# Tool 46: create_material_from_textures
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def create_material_from_textures(
+    asset_path: str,
+    textures: str,
+    tiling: float = 1.0,
+) -> str:
+    """Auto-build a complete PBR material from texture paths.
+
+    Args:
+        asset_path: Path for the new material
+        textures: JSON object mapping channels to texture paths, e.g.:
+            {"base_color": "/Game/T_Albedo", "normal": "/Game/T_Normal", "roughness": "/Game/T_Roughness"}
+            Supported channels: base_color, normal, roughness, metallic, ao, emissive, opacity
+    """
+    try:
+        tex_dict = json.loads(textures)
+    except (json.JSONDecodeError, TypeError):
+        return "Error: Invalid JSON for textures"
+
+    # Build a graph spec from the textures
+    nodes = [
+        {"id": "tiling_param", "class": "ScalarParameter", "pos": [-1200, 0],
+         "props": {"ParameterName": "Tiling", "DefaultValue": str(tiling)}},
+        {"id": "texcoord", "class": "TextureCoordinate", "pos": [-1000, 0]},
+        {"id": "uv_multiply", "class": "Multiply", "pos": [-800, 0]},
+    ]
+    connections = [
+        {"from": "tiling_param", "from_pin": "", "to": "uv_multiply", "to_pin": "A"},
+        {"from": "texcoord", "from_pin": "", "to": "uv_multiply", "to_pin": "B"},
+    ]
+    outputs = []
+
+    channel_map = {
+        "base_color": ("BaseColor", "RGB", -400),
+        "normal": ("Normal", "RGB", -200),
+        "roughness": ("Roughness", "R", 0),
+        "metallic": ("Metallic", "R", 100),
+        "ao": ("AmbientOcclusion", "R", 200),
+        "emissive": ("EmissiveColor", "RGB", 300),
+        "opacity": ("Opacity", "R", 400),
+    }
+
+    for channel, tex_path in tex_dict.items():
+        if channel not in channel_map:
+            continue
+        mat_prop, out_pin, y_offset = channel_map[channel]
+        node_id = f"tex_{channel}"
+        nodes.append({
+            "id": node_id,
+            "class": "TextureSampleParameter2D",
+            "pos": [-500, y_offset],
+            "props": {"ParameterName": channel.replace("_", " ").title()},
+        })
+        connections.append({"from": "uv_multiply", "from_pin": "", "to": node_id, "to_pin": "UVs"})
+        outputs.append({"from": node_id, "from_pin": out_pin, "to_property": mat_prop})
+
+    # First create the material, then build the graph
+    create_script = (
+        f"result = material_helpers.create_material('{_escape_py_string(asset_path)}')\n"
+        "print(result)\n"
+    )
+    create_data = _run_material_script(create_script)
+    create_err = _format_error(create_data)
+    if create_err:
+        return f"Error creating material: {create_err}"
+
+    spec = {"nodes": nodes, "connections": connections, "outputs": outputs}
+    build_script = (
+        f"spec = {repr(spec)}\n"
+        f"result = material_helpers.build_graph_from_spec("
+        f"'{_escape_py_string(asset_path)}', "
+        f"json.dumps(spec), clear_existing=False)\n"
+        "print(result)\n"
+    )
+    data = _run_material_script(build_script)
+    err = _format_error(data)
+    if err:
+        return f"Error building graph: {err}"
+
+    channels_used = [ch for ch in tex_dict.keys() if ch in channel_map]
+    lines = [
+        f"Created PBR material: {asset_path}",
+        f"  Channels: {', '.join(channels_used)}",
+        f"  Nodes: {data.get('nodes_created', 0)}",
+        f"  Connections: {data.get('connections_made', 0)}",
+        f"  Tiling parameter: {tiling}",
+    ]
     return "\n".join(lines)
 
 

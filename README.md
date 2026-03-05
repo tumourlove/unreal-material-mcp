@@ -1,12 +1,12 @@
 # unreal-material-mcp
 
-Material graph intelligence and editing for Unreal Engine AI development via [Model Context Protocol](https://modelcontextprotocol.io/).
+Material graph intelligence, editing, and procedural creation for Unreal Engine AI development via [Model Context Protocol](https://modelcontextprotocol.io/).
 
-Gives AI assistants full access to UE material graphs — read attributes, parameters, expressions, and connections; analyze performance and dependencies; compare materials; edit material instances; and manipulate material graphs (create/delete/connect expressions, set properties, recompile).
+Gives AI assistants full access to UE material graphs — read attributes, parameters, expressions, and connections; analyze performance and dependencies; compare materials; edit material instances and graphs; build entire materials procedurally from templates or JSON specs; validate, export/import, and preview materials. Optional C++ companion plugin for native-speed expression scanning and graph building.
 
 ## Why?
 
-Materials are one of the most complex systems in Unreal — deeply nested expression graphs, layered parameter inheritance, and opaque shader compilation. AI assistants can read C++ and Blueprints, but they can't see inside material graphs or understand how expressions connect. This server exposes the full material graph as structured data and provides editing tools so AI agents can inspect, analyze, and modify materials programmatically.
+Materials are one of the most complex systems in Unreal — deeply nested expression graphs, layered parameter inheritance, and opaque shader compilation. AI assistants can read C++ and Blueprints, but they can't see inside material graphs or understand how expressions connect. This server exposes the full material graph as structured data and provides 46 tools for inspection, analysis, editing, and procedural creation.
 
 **Complements** (does not replace):
 - [unreal-source-mcp](https://github.com/tumourlove/unreal-source-mcp) — Engine-level source intelligence (full UE C++ and HLSL)
@@ -17,11 +17,12 @@ Materials are one of the most complex systems in Unreal — deeply nested expres
 - [unreal-animation-mcp](https://github.com/tumourlove/unreal-animation-mcp) — Animation data inspector and editor (sequences, montages, blend spaces, ABPs, skeletons, 62 tools)
 - [unreal-api-mcp](https://github.com/nicobailon/unreal-api-mcp) by [Nico Bailon](https://github.com/nicobailon) — API surface lookup (signatures, #include paths, deprecation warnings)
 
-Together these servers give AI agents full-stack UE understanding: engine internals, API surface, your project code, build/runtime feedback, Blueprint graph data, config/INI intelligence, material graph inspection + editing, and animation data inspection + editing.
+Together these servers give AI agents full-stack UE understanding: engine internals, API surface, your project code, build/runtime feedback, Blueprint graph data, config/INI intelligence, animation data, and material graph intelligence + procedural creation.
 
 ## Prerequisites
 
 - **Python Remote Execution** must be enabled in the editor: **Edit > Project Settings** > search "remote" > under **Python Remote Execution**, check **"Enable Remote Execution?"**
+- **(Optional) MaterialMCPReader C++ Plugin** — Install in your project's `Plugins/` folder for native-speed expression scanning and declarative graph building. Without it, all tools still work via pure Python (slower for large graphs).
 
 ## Quick Start
 
@@ -65,9 +66,9 @@ Or run from local source during development:
 }
 ```
 
-## Tools
+## Tools (46)
 
-### Read-Only Inspection (5)
+### Read-Only Inspection (7)
 
 | Tool | Description |
 |------|-------------|
@@ -75,6 +76,8 @@ Or run from local source during development:
 | `get_material_parameters` | All parameters (scalar, vector, texture, static switch) with defaults + static switch values/controls |
 | `get_material_expressions` | All expressions with types, names, positions, key properties. Optional class filter |
 | `trace_material_connections` | Connection graph from a specific node or from material output pins |
+| `get_expression_details` | Full property reflection, inputs, and outputs for a single expression node |
+| `get_material_layer_info` | Material Layer and Material Layer Blend structure and parameters |
 | `search_materials` | Find materials by name, parameter name, expression type, or shading model |
 
 ### Read-Only Analysis (8)
@@ -105,13 +108,14 @@ Or run from local source during development:
 | `create_material_instance` | Create a new MaterialInstanceConstant from a parent material |
 | `reparent_material_instance` | Reparent a MaterialInstanceConstant to a different parent |
 
-### Graph Editing (10)
+### Graph Editing (12)
 
 | Tool | Description |
 |------|-------------|
 | `create_material_expression` | Create a new expression node with optional position and properties |
 | `delete_material_expression` | Delete an expression node (auto-disconnects, warns about downstream disconnections) |
 | `connect_material_expressions` | Connect two expressions or connect to a material output pin (warns if overwriting existing connection) |
+| `disconnect_expressions` | Disconnect specific inputs or outputs on an expression node |
 | `set_material_property` | Set blend mode, shading model, two-sided, domain, or usage flags |
 | `set_expression_property` | Set any editor property on an existing expression node |
 | `recompile_material` | Recompile a material after graph changes |
@@ -119,6 +123,52 @@ Or run from local source during development:
 | `duplicate_expression_subgraph` | Deep-copy an expression and its upstream chain into same or different material |
 | `manage_material_parameter` | Add, remove, or rename parameter expressions |
 | `rename_parameter_cascade` | Rename a parameter across a material and all its child instances |
+| `create_custom_hlsl_node` | Create a Custom HLSL expression with inputs, outputs, and code in one call |
+
+### Graph Building & Procedural (7)
+
+| Tool | Description |
+|------|-------------|
+| `create_material` | Create a new empty Material asset at a given path |
+| `duplicate_material` | Duplicate an existing material to a new path |
+| `build_material_graph` | Build an entire material graph from a declarative JSON spec (nodes, connections, outputs) in a single call |
+| `export_material_graph` | Export a material's complete graph to JSON (round-trippable with `build_material_graph`) |
+| `import_material_graph` | Import a material graph from JSON (overwrite or merge mode) |
+| `copy_material_graph` | Copy an entire graph from one material to another |
+| `validate_material` | Validate graph health: find islands, broken textures, duplicate params, unused nodes. Optional auto-fix |
+
+### Templates (2)
+
+| Tool | Description |
+|------|-------------|
+| `list_material_templates` | List available procedural material templates with descriptions and parameters |
+| `create_subgraph_from_template` | Create a material subgraph from a template (noise_blend, pbr_texture_set, fresnel_glow) |
+
+### Preview & Utility (5)
+
+| Tool | Description |
+|------|-------------|
+| `preview_material` | Render a material preview to a PNG file on disk |
+| `get_material_thumbnail` | Get a material thumbnail as base64-encoded PNG |
+| `save_material` | Save a modified material asset to disk |
+| `create_material_from_textures` | Create a complete PBR material from a folder of texture files (auto-detects BaseColor, Normal, etc.) |
+| `run_material_script` | Execute arbitrary Python against a material for advanced operations |
+
+## C++ Companion Plugin (MaterialMCPReader)
+
+An optional UE plugin that accelerates expression scanning and enables declarative graph building at native speed. Install it in your project's `Plugins/` folder for best performance.
+
+**What it provides:**
+- Native expression iteration (bypasses Python brute-force class scanning)
+- Declarative `BuildMaterialGraph` — build entire graphs from JSON in a single undo transaction
+- Round-trip `ExportMaterialGraph` / `ImportMaterialGraph`
+- Material validation, preview rendering, thumbnail generation
+- Custom HLSL node creation with typed inputs/outputs
+- Material Layer inspection
+
+**Auto-detection:** The Python server detects the plugin via `hasattr(unreal, 'MaterialMCPReaderLibrary')` and uses the fast path automatically. No configuration needed — if the plugin is loaded, it's used.
+
+**Without the plugin:** All 46 tools work via pure Python through `MaterialEditingLibrary`. Large materials (~100+ expressions) will be slower to scan.
 
 ## Asset Path Format
 
@@ -146,9 +196,11 @@ Tools accept Unreal asset paths (no file extension):
 
 2. **Helper Module** — On first tool call, uploads `material_helpers.py` to `{project}/Saved/MaterialMCP/`. Tools send short scripts that import it. MD5 hash skips re-upload if unchanged.
 
-3. **Expression Discovery** — UE has no `get_material_expression(mat, index)` API. The server uses brute-force `find_object` scanning across ~100 known expression classes with early termination when the target count is reached.
+3. **C++ Fast Path** — If the MaterialMCPReader plugin is loaded, expression scanning uses native C++ iteration instead of brute-force Python class scanning. Graph building uses `BuildMaterialGraph` for single-call declarative construction wrapped in an undo transaction.
 
-4. **Serving** — FastMCP server exposes 28 tools over stdio. Claude Code manages the server lifecycle automatically.
+4. **Pure Python Fallback** — Without the C++ plugin, expression discovery uses `find_object` scanning across ~100 known expression classes with early termination. All editing goes through `MaterialEditingLibrary`.
+
+5. **Serving** — FastMCP server exposes 46 tools over stdio. Claude Code manages the server lifecycle automatically.
 
 **No database** — all data comes live from the running editor. The server is stateless; materials are read on demand.
 
@@ -157,8 +209,11 @@ Tools accept Unreal asset paths (no file extension):
 ```markdown
 ## Material Graph Intelligence (unreal-material MCP)
 
-Use `unreal-material` MCP tools to inspect and edit material graphs. Requires
-**Python Remote Execution** enabled in editor.
+Use `unreal-material` MCP tools to inspect, edit, and procedurally create material graphs.
+Requires **Python Remote Execution** enabled in editor. Optional **MaterialMCPReader** C++ plugin
+for native-speed operations.
+
+**Inspection & Search:**
 
 | Tool | When |
 |------|------|
@@ -166,18 +221,46 @@ Use `unreal-material` MCP tools to inspect and edit material graphs. Requires
 | `get_material_parameters` | List all parameters with defaults and values |
 | `get_material_expressions` | List all expression nodes in a material graph |
 | `trace_material_connections` | Trace the connection graph from a node or output pin |
-| `get_material_stats` | Check shader instruction counts and compile status |
-| `compare_materials` | Diff two materials side by side |
+| `search_materials` | Find materials by name, parameter, expression type, or shading model |
+
+**Analysis:**
+
+| Tool | When |
+|------|------|
+| `get_material_stats` | Shader instruction counts and compile status |
+| `get_material_dependencies` | Textures used (with sizes/formats), material functions referenced |
+| `compare_materials` | Side-by-side diff of parameters, properties, stats |
+
+**Instance Editing:**
+
+| Tool | When |
+|------|------|
+| `set_material_instance_parameter` | Set parameter overrides on instances |
+| `create_material_instance` | Create a new MaterialInstanceConstant from a parent |
+
+**Graph Editing:**
+
+| Tool | When |
+|------|------|
 | `create_material_expression` | Add a new expression node to a material graph |
 | `connect_material_expressions` | Wire two nodes together (warns if overwriting) |
 | `delete_material_expression` | Remove a node (warns about downstream disconnections) |
 | `recompile_material` | Recompile after graph changes |
-| `set_material_instance_parameter` | Set parameter overrides on instances |
+
+**Graph Building & Procedural:**
+
+| Tool | When |
+|------|------|
+| `create_material` | Create a new empty material asset |
+| `build_material_graph` | Build entire graph from declarative JSON spec |
+| `create_material_from_textures` | Auto-create PBR material from texture folder |
+| `validate_material` | Check graph health, find islands and broken refs |
 
 **Rules:**
 - Graph editing only works on base Materials, not MaterialInstanceConstants
 - Always call `recompile_material` after batching graph changes
 - `connect_material_expressions` takes 4 args (from, out_pin, to, in_pin) — no material arg
+- No database — all data comes live from the running editor
 ```
 
 ## Development
@@ -188,7 +271,7 @@ git clone https://github.com/tumourlove/unreal-material-mcp.git
 cd unreal-material-mcp
 uv sync
 
-# Run tests (60 tests)
+# Run tests (73 tests)
 uv run pytest -v
 
 # Run server locally
