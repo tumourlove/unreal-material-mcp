@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)",
+      "Bash(tasklist:*)",
+      "mcp__unreal-source__search_source",
+      "mcp__unreal-source__read_file",
+      "Bash(PYTHONIOENCODING=utf-8 uv run:*)",
+      "mcp__unreal-source__read_source",
+      "mcp__unreal-source__get_symbol_context",
+      "Bash(gh repo:*)",
+      "Bash(gh:*)",
+      "Bash(echo === $repo ===:*)"
+    ]
+  }
+}
